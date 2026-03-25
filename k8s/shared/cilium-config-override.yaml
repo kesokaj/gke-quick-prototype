@@ -1,0 +1,156 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# Cilium Hybrid Override — Scale-Optimized for High-Churn Benchmark Clusters
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# Applied as: cilium-config-emergency-override ConfigMap (kube-system)
+# Purpose:    Reduce per-agent overhead, increase throughput for endpoint
+#             lifecycle operations, and raise eBPF map capacity.
+#
+# All defaults referenced are from Cilium docs (docs.cilium.io) and verified
+# against the live GKE anetd runtime via `cilium config -a`.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cilium-config-emergency-override
+  namespace: kube-system
+data:
+  # ┌──────────────────────────────────────────────────────────────────────────┐
+  # │  OBSERVABILITY                                                          │
+  # └──────────────────────────────────────────────────────────────────────────┘
+
+  # Hubble is Cilium's built-in observability layer. It captures per-packet
+  # flow events via eBPF ring buffers and exports them for metrics/UI.
+  # Disabling it eliminates the flow-event processing overhead on every agent,
+  # freeing CPU and memory for datapath operations.
+  #
+  # Default: true (enabled)
+  # Ref: https://docs.cilium.io/en/stable/observability/hubble/
+  enable-hubble: "false"
+
+  # Monitor aggregation controls the granularity of BPF tracing events.
+  # Levels: none → low → medium → maximum.
+  #   - none:    trace event per packet (highest overhead)
+  #   - low:     trace event per send packet
+  #   - medium:  trace only on new connections or new TCP flags
+  #   - maximum: alias for medium, with longest reporting interval
+  # Setting to "maximum" with a 60s interval is the single most impactful
+  # tuning to reduce cilium-agent CPU when processing high traffic volumes.
+  #
+  # Default: medium (5s interval)
+  # Ref: https://docs.cilium.io/en/stable/observability/visibility/
+  monitor-aggregation: "maximum"
+  monitor-aggregation-interval: "60s"
+
+  # ┌──────────────────────────────────────────────────────────────────────────┐
+  # │  API SERVER LOAD REDUCTION                                              │
+  # └──────────────────────────────────────────────────────────────────────────┘
+  # K8s heartbeat timeout: the agent periodically checks API server
+  # connectivity and marks itself unhealthy if no response within this window.
+  # In high-churn benchmarks, transient API server latency spikes can cause
+  # false-positive health failures. Setting to "0" disables the heartbeat
+  # check entirely.
+  #
+  # Default: 30s
+  # Ref: https://docs.cilium.io/en/stable/cmdref/cilium-agent/
+  k8s-heartbeat-timeout: "0"
+
+  # K8s client QPS and burst control the agent's outbound request rate to the
+  # Kubernetes API server. With CRD reductions (no CEP, CES, CiliumNode),
+  # each endpoint lifecycle triggers ~2-3 API calls (mainly identity CRD ops).
+  #
+  # Set to 100/300: 10× upstream default. During a 1000+ pod burst the burst
+  # of 300 absorbs the initial thundering herd of identity lookups. GKE's API
+  # server has API Priority and Fairness (APF) built in, so it will self-
+  # protect with 429s if we actually overwhelm it — this is a client-side
+  # "how fast are you willing to try" knob, not a risk of breaking the server.
+  #
+  # Default: k8s-client-qps=10, k8s-client-burst=20
+  # Ref: https://docs.cilium.io/en/stable/cmdref/cilium-agent/
+  k8s-client-qps: "100"
+  k8s-client-burst: "300"
+
+  # ┌──────────────────────────────────────────────────────────────────────────┐
+  # │  AGENT ENDPOINT RATE LIMITS (Auto-Adjusted)                             │
+  # └──────────────────────────────────────────────────────────────────────────┘
+
+  # Internal rate limits for the cilium-agent's own endpoint create/delete API.
+  # These govern how fast the agent processes endpoint operations locally (BPF
+  # compilation, identity resolution, policy injection).
+  #
+  # Using AUTO-ADJUST mode (Cilium-recommended for heterogeneous hardware):
+  #   Cilium measures actual BPF processing time and dynamically tunes
+  #   rate-limit, rate-burst, and parallel-requests to hit the target
+  #   estimated-processing-duration. This adapts to both 8 and 16+ vCPU
+  #   nodes without static guessing.
+  #
+  #   Algorithm: AdjustmentFactor = EstimatedDuration / MeanDuration
+  #   If agent is faster than target → scales UP (takes on more work)
+  #   If agent is slower than target → scales DOWN (backs off)
+  #
+  # Parameters:
+  #   rate-limit: 10/s       starting rate; auto-scales up to 100× (1000/s)
+  #   rate-burst: 20         starting burst; auto-scales proportionally
+  #   parallel-requests: 4   starting concurrency; safe on any node ≥ 4 vCPU
+  #   min-parallel-requests: 4   floor — ensures forward progress under load
+  #   max-parallel-requests: 12  ceiling — caps at 12 to prevent CPU starvation
+  #                               (on 8 vCPU, auto-adjust settles at ~4-6;
+  #                                on 16 vCPU, it can reach 10-12)
+  #   estimated-processing-duration: 200ms  target per-endpoint processing time
+  #   max-adjustment-factor: 100.0  allows 100× scaling from base values
+  #
+  # Default: rate-limit:0.5/s, burst:4, parallel:4, auto-adjust:true
+  # Ref: https://docs.cilium.io/en/stable/configuration/api-rate-limiting/
+  api-rate-limit: |
+    {
+      "endpoint-create": "rate-limit:10/s,rate-burst:20,parallel-requests:4,min-parallel-requests:4,max-parallel-requests:12,estimated-processing-duration:200ms,max-adjustment-factor:100.0,auto-adjust:true",
+      "endpoint-delete": "rate-limit:10/s,rate-burst:20,parallel-requests:4,min-parallel-requests:4,max-parallel-requests:12,estimated-processing-duration:200ms,max-adjustment-factor:100.0,auto-adjust:true"
+    }
+
+  # ┌──────────────────────────────────────────────────────────────────────────┐
+  # │  eBPF MAP CAPACITY                                                      │
+  # └──────────────────────────────────────────────────────────────────────────┘
+
+  # Dynamic size ratio: percentage of total system memory allocated to large
+  # eBPF maps (connection tracking, SNAT, neighbor tables, LB reverse NAT).
+  # Doubling from 0.25% → 0.5% prevents map-resize stalls during traffic
+  # surges. Individual map flags (e.g., --bpf-ct-global-tcp-max) override
+  # this ratio for their specific maps.
+  #
+  # Default: 0.0025 (0.25% of system memory)
+  # Ref: https://docs.cilium.io/en/stable/operations/performance/scalability/
+  bpf-map-dynamic-size-ratio: "0.005"
+
+  # Service frontend map: stores ClusterIP/NodePort → backend mappings.
+  # Service backend map: stores the actual backend endpoint entries.
+  # Both doubled from 256K → 512K entries. If either map fills up, the agent
+  # cannot reconcile new services, causing connectivity failures for new
+  # deployments.
+  #
+  # Default: 262144 (256K) for both maps
+  # Ref: https://docs.cilium.io/en/stable/operations/performance/scalability/
+  bpf-lb-service-map-max: "524288"
+  bpf-lb-service-backend-map-max: "524288"
+
+  # ┌──────────────────────────────────────────────────────────────────────────┐
+  # │  CRD & FEATURE REDUCTION                                                │
+  # └──────────────────────────────────────────────────────────────────────────┘
+
+  # Redirect Service: GKE-specific dataplane feature for service traffic
+  # steering. Disabling it reduces eBPF per-packet processing overhead.
+  # Distinct from enable-local-redirect-policy (which remains enabled for
+  # NodeLocal DNS).
+  #
+  # Default: true (in GKE)
+  enable-redirect-service: "false"
+
+  # CiliumNode CRD: used for CRD-backed IPAM (e.g., AWS ENI mode). GKE uses
+  # "delegated-plugin" IPAM, so CiliumNode resources are unnecessary. These
+  # two settings disable both the auto-creation of CiliumNode objects and the
+  # CRD watch itself, removing per-node API overhead.
+  #
+  # Default: auto-create-cilium-node-resource=true, enable-ciliumnode-crd=true
+  # Ref: https://docs.cilium.io/en/stable/network/concepts/ipam/crd/
+  auto-create-cilium-node-resource: "false"
+  enable-ciliumnode-crd: "false"

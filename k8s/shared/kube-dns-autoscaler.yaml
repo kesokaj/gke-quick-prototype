@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kube-dns-autoscaler
+  namespace: kube-system
+data:
+  # Performance tuning: 1 kube-dns replica per node.
+  # The autoscaler reads the "linear" key as JSON.
+  linear: |-
+    {
+      "coresPerReplica": 256,
+      "nodesPerReplica": 1,
+      "min": 1,
+      "includeUnschedulableNodes": true,
+      "preventSinglePointFailure": false
+    }

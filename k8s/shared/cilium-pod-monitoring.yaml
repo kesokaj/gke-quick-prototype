@@ -1,0 +1,17 @@
+apiVersion: monitoring.googleapis.com/v1
+kind: ClusterPodMonitoring
+metadata:
+  name: cilium-agent
+spec:
+  selector:
+    matchLabels:
+      k8s-app: cilium
+  endpoints:
+    - port: 9990
+      interval: 5s
+      path: /metrics
+  targetLabels:
+    metadata:
+      - pod
+      - node
+      - container
