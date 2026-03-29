@@ -14,9 +14,6 @@
 # Gemini
 .gemini/
 
-# Docs
-docs/
-
 # Temp
 tmp/
 
