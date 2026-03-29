@@ -29,10 +29,10 @@ All resources are created idempotently — the script detects existing resources
 | **VPC** | Custom-mode VPC with subnet + secondary ranges (pods/services) |
 | **Firewall Rules** | ICMP, SSH, RDP, Load Balancer healthcheck, IAP, internal |
 | **Cloud NAT** | Dynamic port allocation, high-churn timeouts, 1024 min ports/VM |
-| **GKE Cluster** | Private cluster, DPv2, VPA, HPA performance, Workload Identity, Filestore CSI |
-| **Default Pool** | Static node count (1/zone), gVNIC, shielded instance |
-| **Secondary Pool** | Fully configurable from `.env`, UBUNTU image, nested-virt, sysctl tuning |
-| **Shared K8s Configs** | Cilium override, anetd restart, kube-dns autoscaler, Cilium pod monitoring |
+| **GKE Cluster** | Private cluster, DPv2, Cloud DNS, Workload Identity, conditional addons |
+| **Default Pool** | Static node count (1/zone), shielded instance |
+| **Secondary Pool** | Fully configurable from `.env`, COS image, gVisor sandbox, GCFS |
+| **Shared K8s Configs** | Cilium override, Cilium/netd/kubelet/controller monitoring (all 10s scrape) |
 
 ## Configuration
 
@@ -44,8 +44,9 @@ All settings are in **`.env`**. The file is self-documented with inline comments
 |---|---|
 | **Project & Region** | GCP project, cluster name, region, release channel |
 | **Network** | VPC, subnet, CIDR ranges, Cloud NAT toggle |
-| **Default Pool** | Machine type, disk, node count, gVNIC, shielded, auto-repair/upgrade |
-| **Secondary Pool** | Machine type, disk, image, autoscaling, spot, gVNIC, shielded, nested-virt, threads-per-core, tags, labels, taints |
+| **Default Pool** | Machine type, disk, node count, shielded, auto-repair/upgrade |
+| **Secondary Pool** | Machine type, disk, image, autoscaling, spot, gVisor, GCFS, shielded, tags, labels, taints |
+| **Cluster Features** | Autoscaling profile, VPA, HPA, Cloud DNS, DNS cache, Filestore CSI, image streaming, cost allocation, Secret Manager, fleet |
 
 ### Optional Flags Pattern
 
@@ -73,12 +74,11 @@ SECONDARY_THREADS_PER_CORE="2"  # Required when NESTED_VIRT=true
 
 > **Note:** `AUTO_UPGRADE` must be `true` when using a release channel (RAPID/REGULAR/STABLE).
 
-## Secondary Pool Sysctl Config
+## Secondary Pool Node Config
 
-The file `k8s/secondary/node-system-config.yaml` is applied via `--system-config-from-file` during pool creation. It configures:
+The secondary pool can optionally apply a node system config file via `SECONDARY_SYSTEM_CONFIG` in `.env`. Set the path to a YAML file with kubelet and sysctl tuning. Leave empty to skip.
 
-- **kubeletConfig**: `allowedUnsafeSysctls: [net.*]` — lets pods set net sysctls via `securityContext`
-- **linuxConfig.sysctl**: 20 kernel parameters for high-churn workloads (conntrack, socket buffers, TIME_WAIT, file descriptors)
+The pool uses **gVisor** sandbox runtime (`--sandbox type=gvisor`) and **COS_CONTAINERD** image by default. GCFS (image streaming) is enabled at the node pool level.
 
 ## Shared K8s Configs
 
@@ -86,15 +86,17 @@ Applied automatically during `./cluster.sh create`:
 
 | File | Purpose |
 |---|---|
-| `k8s/shared/cilium-config-override.yaml` | DPv2 scale-optimized tuning (Hubble off, eBPF map sizes, rate limits) |
-| `k8s/shared/cilium-pod-monitoring.yaml` | GMP `ClusterPodMonitoring` for anetd (port 9990) |
-| `k8s/shared/kube-dns-autoscaler.yaml` | 1 kube-dns replica per node |
+| `gke/shared/cilium-config-override.yaml` | DPv2 scale-optimized tuning (monitor aggregation, eBPF map sizes, rate limits) |
+| `gke/shared/cilium-pod-monitoring.yaml` | GMP `ClusterPodMonitoring` for anetd (port 9990, 10s) |
+| `gke/shared/netd-conntrack-monitoring.yaml` | GMP `ClusterPodMonitoring` for conntrack/socket metrics (port 10231, 10s) |
+| `gke/shared/controller-pod-monitoring.yaml` | GMP `PodMonitoring` for sandbox-controller (port 8080, 10s) |
+| `gke/shared/kubelet-extra-monitoring.yaml` | GMP `ClusterNodeMonitoring` for kubelet metrics (10s) |
 
 ## Commands
 
 ```bash
 ./cluster.sh create  [--dry-run]   # VPC + subnet + cluster + secondary pool + shared configs
-./cluster.sh apply   [--dry-run]   # Apply k8s/secondary/ manifests
+./cluster.sh apply   [--dry-run]   # Apply gke/secondary/ manifests
 ./cluster.sh delete  [--dry-run]   # Delete cluster (preserves VPC)
 ./cluster.sh status                # Show cluster + node pool info
 ```
@@ -107,17 +109,24 @@ Use `--dry-run` to preview gcloud commands without executing them.
 .
 ├── .env                                # All configuration
 ├── cluster.sh                          # Lifecycle entrypoint
-├── k8s/
+├── app/
+│   ├── controller/                     # Warm pool controller (Go)
+│   ├── sandbox/                        # Simulation pod binary (Go)
+│   ├── manifests/                      # K8s manifests (namespaces, controller, deployment, netpol)
+│   ├── tests/                          # Benchmark + monitoring scripts
+│   └── deploy.sh                       # Build, push, and deploy script
+├── gke/
 │   ├── shared/                         # Applied during cluster create
 │   │   ├── cilium-config-override.yaml
 │   │   ├── cilium-pod-monitoring.yaml
-│   │   └── kube-dns-autoscaler.yaml
+│   │   ├── netd-conntrack-monitoring.yaml
+│   │   ├── controller-pod-monitoring.yaml
+│   │   └── kubelet-extra-monitoring.yaml
+│   ├── manual/                         # Manual-apply configs (not auto-deployed)
+│   │   └── cilium-identity-labels-patch.yaml
 │   └── secondary/                      # Secondary pool configs
-│       └── node-system-config.yaml     # Sysctl + kubelet config
-├── docs/
-│   ├── architecture/
-│   │   └── DECISIONS.md
-│   └── changes/
-│       └── *.md
+├── gcp/
+│   ├── dashboard.json.tpl              # GCP Monitoring dashboard template (__CLUSTER_NAME__ placeholder)
+│   └── deploy-dashboard.sh             # Dashboard deploy script (delete + create)
 └── README.md
 ```

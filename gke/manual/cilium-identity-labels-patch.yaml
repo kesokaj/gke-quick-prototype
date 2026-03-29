@@ -1,0 +1,71 @@
+# =============================================================================
+# Cilium Identity-Relevant Label Filtering
+# =============================================================================
+#
+# Purpose:
+#   Exclude the 'warmpool' label from Cilium's identity computation.
+#   When a sandbox pod is claimed (warmpool=true → false), Cilium currently
+#   creates a NEW identity and regenerates all endpoints. This causes
+#   unnecessary churn in the identity cache and endpoint propagation delays.
+#
+#   By excluding 'warmpool' from identity-relevant labels, all sandbox pods
+#   share ONE identity regardless of their warmpool state, eliminating the
+#   regeneration cost on claim.
+#
+# How it works (from GKE docs):
+#   The 'labels' field in cilium-config controls which k8s labels Cilium
+#   uses for identity generation. The '!' prefix excludes a label.
+#   GKE preserves user modifications to fields it does not manage.
+#
+# Current state (before patch):
+#   Identity 3255: warmpool=true  (idle pool)    ← all idle pods share this
+#   Identity 1401: warmpool=false (claimed)      ← all claimed pods share this
+#   Every claim triggers: endpoint regeneration + identity propagation
+#
+# After patch:
+#   Single identity for all sandbox pods — no regeneration on claim.
+#
+# Application steps:
+#   1. Apply this patch:
+#      kubectl patch configmap cilium-config -n kube-system --type merge \
+#        -p "$(cat gke/shared/cilium-identity-labels-patch.yaml | python3 -c \
+#        'import yaml,json,sys; print(json.dumps(yaml.safe_load(sys.stdin)))')"
+#
+#      Or simply:
+#      kubectl edit configmap cilium-config -n kube-system
+#      # Add under 'data:':
+#      #   labels: "!warmpool"
+#
+#   2. Restart the anet-operator (forces config reload):
+#      gcloud container clusters upgrade $CLUSTER_NAME \
+#        --location $REGION \
+#        --project $PROJECT \
+#        --cluster-version $(gcloud container clusters describe $CLUSTER_NAME \
+#          --location $REGION --project $PROJECT \
+#          --format="value(currentMasterVersion)") \
+#        --master
+#
+#   3. Restart anetd DaemonSet:
+#      kubectl rollout restart daemonset anetd -n kube-system
+#
+#   4. Verify with monitor script:
+#      ./app/tests/monitor-cilium-identity.sh snapshot
+#
+# References:
+#   - https://docs.cloud.google.com/kubernetes-engine/docs/how-to/dataplane-v2#known_issues
+#   - https://docs.cilium.io/en/stable/operations/performance/scalability/identity-relevant-labels/
+#
+# =============================================================================
+
+# This is a STRATEGIC MERGE PATCH for cilium-config ConfigMap.
+# Apply with: kubectl patch configmap cilium-config -n kube-system --type merge -p '...'
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cilium-config
+  namespace: kube-system
+data:
+  # Exclude 'warmpool' from identity-relevant labels.
+  # The '!' prefix tells Cilium to ignore this label when computing identities.
+  # All sandbox pods will share one identity regardless of warmpool=true/false.
+  labels: "!warmpool"

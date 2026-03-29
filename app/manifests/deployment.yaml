@@ -1,0 +1,115 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sandbox-pool
+  namespace: sandbox
+  labels:
+    app: sandbox-pool
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 0
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      managed-by: warmpool
+      warmpool: "true"
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 0
+    type: RollingUpdate
+  template:
+    metadata:
+      annotations:
+        cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
+      labels:
+        managed-by: warmpool
+        warmpool: "true"
+        is-sandbox: "true"
+    spec:
+      serviceAccountName: sandbox-sa
+      automountServiceAccountToken: true
+      containers:
+        - name: sandbox-env
+          image: IMAGE_PLACEHOLDER
+          imagePullPolicy: Always
+          resources:
+            requests:
+              cpu: 100m
+              memory: "256Mi"
+            limits:
+              memory: "32Gi"
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.namespace
+
+          livenessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /_sandbox/status?keepalive=false
+              port: 3004
+              scheme: HTTP
+            initialDelaySeconds: 1
+            periodSeconds: 60
+            successThreshold: 1
+            timeoutSeconds: 5
+          readinessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /_sandbox/status?keepalive=false
+              port: 3004
+              scheme: HTTP
+            initialDelaySeconds: 1
+            periodSeconds: 2
+            successThreshold: 1
+            timeoutSeconds: 2
+          startupProbe:
+            failureThreshold: 1000
+            httpGet:
+              path: /_sandbox/status?keepalive=false
+              port: 3004
+              scheme: HTTP
+            periodSeconds: 1
+            successThreshold: 1
+            timeoutSeconds: 5
+          securityContext:
+            capabilities:
+              drop:
+                - NET_RAW
+          volumeMounts:
+            - name: podinfo
+              mountPath: /etc/podinfo
+              readOnly: true
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+      dnsConfig:
+        nameservers:
+          - 8.8.8.8
+          - 1.1.1.1
+      dnsPolicy: None
+      restartPolicy: Always
+      runtimeClassName: gvisor
+      securityContext: {}
+      terminationGracePeriodSeconds: 30
+      volumes:
+        - name: podinfo
+          downwardAPI:
+            items:
+              - path: labels
+                fieldRef:
+                  fieldPath: metadata.labels
+      topologySpreadConstraints:
+        - labelSelector:
+            matchLabels:
+              is-sandbox: "true"
+          maxSkew: 2
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway

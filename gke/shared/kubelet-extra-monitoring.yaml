@@ -1,0 +1,13 @@
+apiVersion: monitoring.googleapis.com/v1
+kind: ClusterNodeMonitoring
+metadata:
+  name: sandbox-kubelet-extra
+spec:
+  endpoints:
+    - interval: 10s
+      path: /metrics
+      scheme: https
+      metricRelabeling:
+        - action: keep
+          sourceLabels: [__name__]
+          regex: "kubelet_.*"

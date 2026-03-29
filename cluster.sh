@@ -4,7 +4,7 @@
 #
 # Usage:
 #   ./cluster.sh create  [--dry-run]   VPC + subnet + cluster + shared k8s configs
-#   ./cluster.sh apply   [--dry-run]   Apply k8s/secondary/ configs (CCC, etc.)
+#   ./cluster.sh apply   [--dry-run]   Apply gke/secondary/ configs (CCC, etc.)
 #   ./cluster.sh delete  [--dry-run]   Delete cluster (preserves VPC)
 #   ./cluster.sh status                Show cluster + node pool info
 #
@@ -42,18 +42,22 @@ header() { echo -e "\n${CYAN}━━━ $* ━━━${NC}\n"; }
 # Configuration (sourced from .env, with fallbacks)
 # ---------------------------------------------------------------------------
 PROJECT="${PROJECT:-$(gcloud config get-value project 2>/dev/null)}"
-CLUSTER_NAME="${CLUSTER_NAME:-kata-gke}"
+CLUSTER_NAME="${CLUSTER_NAME:-sandbox-testing}"
 REGION="${REGION:-europe-west4}"
 RELEASE_CHANNEL="${RELEASE_CHANNEL:-rapid}"
 RELEASE_CHANNEL="${RELEASE_CHANNEL,,}"  # gcloud requires lowercase
+CLUSTER_VERSION="${CLUSTER_VERSION:-}"
 
 # Network
 VPC="${VPC:-kfg-network}"
+VPC_MTU="${VPC_MTU:-1460}"
 SUBNET="${SUBNET:-kfg-subnet-${REGION}}"
 SUBNET_RANGE="${SUBNET_RANGE:-10.10.0.0/20}"
 SUBNET_SECONDARY_PODS="${SUBNET_SECONDARY_PODS:-10.100.0.0/16}"
 SUBNET_SECONDARY_SERVICE="${SUBNET_SECONDARY_SERVICE:-10.200.0.0/20}"
 PODS_RANGE_NAME="${PODS_RANGE_NAME:-pods}"
+SECONDARY_PODS_RANGE_NAME="${SECONDARY_PODS_RANGE_NAME:-secondary-pods}"
+SECONDARY_PODS_RANGE="${SECONDARY_PODS_RANGE:-10.50.0.0/16}"
 SERVICES_RANGE_NAME="${SERVICES_RANGE_NAME:-services}"
 ENABLE_CLOUD_NAT="${ENABLE_CLOUD_NAT:-true}"
 
@@ -73,7 +77,7 @@ DEFAULT_AUTO_UPGRADE="${DEFAULT_AUTO_UPGRADE:-false}"
 SECONDARY_MACHINE_TYPE="${SECONDARY_MACHINE_TYPE:-n2-standard-8}"
 SECONDARY_DISK_TYPE="${SECONDARY_DISK_TYPE:-pd-ssd}"
 SECONDARY_DISK_SIZE="${SECONDARY_DISK_SIZE:-300}"
-SECONDARY_IMAGE_TYPE="${SECONDARY_IMAGE_TYPE:-UBUNTU_CONTAINERD}"
+SECONDARY_IMAGE_TYPE="${SECONDARY_IMAGE_TYPE:-COS_CONTAINERD}"
 SECONDARY_AUTOSCALING="${SECONDARY_AUTOSCALING:-true}"
 SECONDARY_NUM_NODES="${SECONDARY_NUM_NODES:-0}"
 SECONDARY_MIN_NODES="${SECONDARY_MIN_NODES:-0}"
@@ -93,6 +97,93 @@ SECONDARY_AUTO_UPGRADE="${SECONDARY_AUTO_UPGRADE:-false}"
 SECONDARY_TAGS="${SECONDARY_TAGS:-}"
 SECONDARY_LABELS="${SECONDARY_LABELS:-}"
 SECONDARY_TAINTS="${SECONDARY_TAINTS:-}"
+SECONDARY_SANDBOX_TYPE="${SECONDARY_SANDBOX_TYPE:-gvisor}"
+SECONDARY_GCFS="${SECONDARY_GCFS:-true}"
+SECONDARY_SYSTEM_CONFIG="${SECONDARY_SYSTEM_CONFIG:-}"
+
+# Cluster features
+AUTOSCALING_PROFILE="${AUTOSCALING_PROFILE:-balanced}"
+ENABLE_VPA="${ENABLE_VPA:-false}"
+HPA_PROFILE="${HPA_PROFILE:-}"
+CLUSTER_DNS="${CLUSTER_DNS:-clouddns}"
+CLUSTER_DNS_SCOPE="${CLUSTER_DNS_SCOPE:-cluster}"
+ENABLE_DNS_CACHE="${ENABLE_DNS_CACHE:-true}"
+ENABLE_FILESTORE_CSI="${ENABLE_FILESTORE_CSI:-false}"
+ENABLE_IMAGE_STREAMING="${ENABLE_IMAGE_STREAMING:-false}"
+ENABLE_COST_ALLOCATION="${ENABLE_COST_ALLOCATION:-true}"
+ENABLE_SECRET_MANAGER="${ENABLE_SECRET_MANAGER:-true}"
+ENABLE_L4_ILB_SUBSETTING="${ENABLE_L4_ILB_SUBSETTING:-false}"
+FLEET_PROJECT="${FLEET_PROJECT:-${PROJECT}}"
+
+# ---------------------------------------------------------------------------
+# Ensure required GCP APIs are enabled
+# ---------------------------------------------------------------------------
+ensure_apis() {
+    local -a required_apis=(
+        # Core compute & containers
+        compute.googleapis.com
+        container.googleapis.com
+
+        # IAM
+        iam.googleapis.com
+        iap.googleapis.com
+
+        # Networking
+        dns.googleapis.com
+        networkmanagement.googleapis.com
+        networkservices.googleapis.com
+        networksecurity.googleapis.com
+        firewallinsights.googleapis.com
+
+        # Observability & monitoring
+        logging.googleapis.com
+        monitoring.googleapis.com
+        opsconfigmonitoring.googleapis.com
+        clouderrorreporting.googleapis.com
+        cloudtrace.googleapis.com
+
+        # Security
+        containersecurity.googleapis.com
+        secretmanager.googleapis.com
+
+        # Artifact & build
+        artifactregistry.googleapis.com
+        cloudbuild.googleapis.com
+
+        # Storage
+        storage.googleapis.com
+        storage-component.googleapis.com
+
+        # GKE ecosystem & fleet
+        gkehub.googleapis.com
+        anthos.googleapis.com
+
+        # Resource management
+        cloudresourcemanager.googleapis.com
+        serviceusage.googleapis.com
+        cloudquotas.googleapis.com
+        recommender.googleapis.com
+    )
+
+    header "Ensuring GCP APIs"
+    local apis_to_enable=()
+    local enabled_apis
+    enabled_apis=$(gcloud services list --project="${PROJECT}" --enabled --format="value(config.name)" 2>/dev/null)
+
+    for api in "${required_apis[@]}"; do
+        if echo "${enabled_apis}" | grep -q "^${api}$"; then
+            ok "API already enabled: ${api}"
+        else
+            apis_to_enable+=("${api}")
+        fi
+    done
+
+    if [[ ${#apis_to_enable[@]} -gt 0 ]]; then
+        log "Enabling ${#apis_to_enable[@]} APIs (this may take a minute)..."
+        gcloud services enable "${apis_to_enable[@]}" --project="${PROJECT}" --quiet
+        ok "APIs enabled: ${apis_to_enable[*]}"
+    fi
+}
 
 # ---------------------------------------------------------------------------
 # Validation
@@ -133,6 +224,7 @@ exec_or_dry() {
 cmd_create() {
     local dry_run="${1:-}"
     validate
+    ensure_apis
 
     # Service accounts
     header "Creating Service Accounts"
@@ -161,6 +253,7 @@ cmd_create() {
         gcloud compute networks create "${VPC}"
         --project="${PROJECT}"
         --subnet-mode=custom
+        --mtu="${VPC_MTU}"
         --quiet
     )
     if gcloud compute networks describe "${VPC}" --project="${PROJECT}" &>/dev/null; then
@@ -204,6 +297,7 @@ cmd_create() {
         --region="${REGION}"
         --range="${SUBNET_RANGE}"
         --secondary-range="${PODS_RANGE_NAME}=${SUBNET_SECONDARY_PODS}"
+        --secondary-range="${SECONDARY_PODS_RANGE_NAME}=${SECONDARY_PODS_RANGE}"
         --secondary-range="${SERVICES_RANGE_NAME}=${SUBNET_SECONDARY_SERVICE}"
         --enable-private-ip-google-access
         --quiet
@@ -279,15 +373,12 @@ cmd_create() {
             --num-nodes="${NUM_NODES}"
             --no-enable-autoscaling
             --location-policy=ANY
-            --autoscaling-profile=optimize-utilization
-            --enable-vertical-pod-autoscaling
-            --hpa-profile=performance
+            --autoscaling-profile="${AUTOSCALING_PROFILE}"
             --max-surge-upgrade=3
             --max-unavailable-upgrade=1
             --release-channel="${RELEASE_CHANNEL}"
             --scopes=https://www.googleapis.com/auth/cloud-platform
             --service-account="gke-default@${PROJECT}.iam.gserviceaccount.com"
-            --enable-image-streaming
             --logging-variant=MAX_THROUGHPUT
             --metadata=disable-legacy-endpoints=true
 
@@ -306,15 +397,12 @@ cmd_create() {
             # DPv2 Scale-Optimized: disable overhead
             --in-transit-encryption=none
             --disable-l4-lb-firewall-reconciliation
+            --enable-l4-ilb-subsetting
 
             # Private cluster
             --enable-private-nodes
             --enable-dns-access
             --no-enable-ip-access
-
-            # Addons
-            --addons=NodeLocalDNS=DISABLED
-            --addons=GcpFilestoreCsiDriver=ENABLED
 
             # Gateway API
             --gateway-api=standard
@@ -332,6 +420,22 @@ cmd_create() {
         [[ "${DEFAULT_SHIELDED_INTEGRITY}" == "true" ]] && cluster_cmd+=(--shielded-integrity-monitoring)
         [[ "${DEFAULT_AUTO_REPAIR}" == "true" ]] && cluster_cmd+=(--enable-autorepair) || cluster_cmd+=(--no-enable-autorepair)
         [[ "${DEFAULT_AUTO_UPGRADE}" == "true" ]] && cluster_cmd+=(--enable-autoupgrade) || cluster_cmd+=(--no-enable-autoupgrade)
+
+        # Cluster feature flags
+        [[ -n "${CLUSTER_VERSION}" ]] && cluster_cmd+=(--cluster-version="${CLUSTER_VERSION}")
+        [[ "${ENABLE_VPA}" == "true" ]] && cluster_cmd+=(--enable-vertical-pod-autoscaling)
+        [[ -n "${HPA_PROFILE}" ]] && cluster_cmd+=(--hpa-profile="${HPA_PROFILE}")
+        [[ "${ENABLE_IMAGE_STREAMING}" == "true" ]] && cluster_cmd+=(--enable-image-streaming)
+        [[ "${ENABLE_COST_ALLOCATION}" == "true" ]] && cluster_cmd+=(--enable-cost-allocation)
+        [[ "${ENABLE_SECRET_MANAGER}" == "true" ]] && cluster_cmd+=(--enable-secret-manager)
+        [[ -n "${CLUSTER_DNS}" ]] && cluster_cmd+=(--cluster-dns="${CLUSTER_DNS}" --cluster-dns-scope="${CLUSTER_DNS_SCOPE}")
+        [[ -n "${FLEET_PROJECT}" ]] && cluster_cmd+=(--fleet-project="${FLEET_PROJECT}")
+
+        # Build addons string (gcloud only accepts a single --addons flag)
+        local addons="HttpLoadBalancing"
+        [[ "${ENABLE_DNS_CACHE}" == "true" ]] && addons+=",NodeLocalDNS"
+        [[ "${ENABLE_FILESTORE_CSI}" == "true" ]] && addons+=",GcpFilestoreCsiDriver"
+        cluster_cmd+=(--addons="${addons}")
 
         exec_or_dry "${dry_run}" "${cluster_cmd[@]}"
         ok "Cluster created: ${CLUSTER_NAME}"
@@ -355,7 +459,7 @@ cmd_create() {
     if gcloud container node-pools describe secondary-pool --cluster="${CLUSTER_NAME}" --project="${PROJECT}" --region="${REGION}" &>/dev/null; then
         ok "Secondary pool already exists"
     else
-        local sysctl_config="${SCRIPT_DIR}/k8s/secondary/node-system-config.yaml"
+        local sysctl_config="${SECONDARY_SYSTEM_CONFIG:-}"
         local -a secondary_cmd=(
             gcloud beta container node-pools create secondary-pool
             --cluster="${CLUSTER_NAME}"
@@ -373,6 +477,7 @@ cmd_create() {
             --service-account="gke-secondary@${PROJECT}.iam.gserviceaccount.com"
             --workload-metadata=GKE_METADATA
             --metadata=disable-legacy-endpoints=true
+            --pod-ipv4-range="${SECONDARY_PODS_RANGE_NAME}"
         )
         # Autoscaling
         if [[ "${SECONDARY_AUTOSCALING}" == "true" ]]; then
@@ -408,10 +513,14 @@ cmd_create() {
         [[ -n "${SECONDARY_LABELS}" ]] && secondary_cmd+=(--node-labels="${SECONDARY_LABELS}")
         [[ -n "${SECONDARY_TAINTS}" ]] && secondary_cmd+=(--node-taints="${SECONDARY_TAINTS}")
         # Sysctl config
-        if [[ -f "${sysctl_config}" ]]; then
+        if [[ -n "${sysctl_config}" ]] && [[ -f "${sysctl_config}" ]]; then
             secondary_cmd+=(--system-config-from-file="${sysctl_config}")
             log "Using sysctl config: ${sysctl_config}"
         fi
+        # Sandbox runtime (gVisor)
+        [[ -n "${SECONDARY_SANDBOX_TYPE}" ]] && secondary_cmd+=(--sandbox "type=${SECONDARY_SANDBOX_TYPE}")
+        # GCFS (container image streaming at node level)
+        [[ "${SECONDARY_GCFS}" == "true" ]] && secondary_cmd+=(--enable-gcfs)
         secondary_cmd+=(--quiet)
 
         exec_or_dry "${dry_run}" "${secondary_cmd[@]}"
@@ -424,7 +533,7 @@ cmd_create() {
     log "  Secondary pool: ${SECONDARY_MACHINE_TYPE} (${SECONDARY_MIN_NODES}-${SECONDARY_MAX_NODES} nodes)"
     log "  Dataplane:      DPv2 Scale-Optimized Mode"
     log ""
-    log "  Next: ./cluster.sh apply  (applies k8s/secondary/ manifests)"
+    log "  Next: ./cluster.sh apply  (applies gke/secondary/ manifests)"
 }
 
 # ---------------------------------------------------------------------------
@@ -432,7 +541,7 @@ cmd_create() {
 # ---------------------------------------------------------------------------
 apply_shared() {
     local dry_run="${1:-}"
-    local shared_dir="${SCRIPT_DIR}/k8s/shared"
+    local shared_dir="${SCRIPT_DIR}/gke/shared"
 
     header "Applying Shared K8s Configs"
 
@@ -461,17 +570,6 @@ apply_shared() {
         fi
     fi
 
-    # kube-dns autoscaler
-    if [[ -f "${shared_dir}/kube-dns-autoscaler.yaml" ]]; then
-        log "Applying kube-dns autoscaler..."
-        if [[ "${dry_run}" == "--dry-run" ]]; then
-            warn "DRY RUN — would kubectl replace kube-dns-autoscaler"
-        else
-            kubectl replace -f "${shared_dir}/kube-dns-autoscaler.yaml"
-            ok "kube-dns autoscaler configured"
-        fi
-    fi
-
     # Cilium pod monitoring
     if [[ -f "${shared_dir}/cilium-pod-monitoring.yaml" ]]; then
         log "Applying Cilium pod monitoring..."
@@ -491,10 +589,10 @@ cmd_apply() {
     local dry_run="${1:-}"
     validate
 
-    local secondary_dir="${SCRIPT_DIR}/k8s/secondary"
+    local secondary_dir="${SCRIPT_DIR}/gke/secondary"
     header "Applying Secondary Pool K8s Configs"
 
-    # Apply all YAML files in k8s/secondary/ (skip node-system-config.yaml)
+    # Apply all YAML files in gke/secondary/ (skip node-system-config.yaml)
     local found=0
     for f in "${secondary_dir}"/*.yaml; do
         [[ -f "${f}" ]] || continue
@@ -585,7 +683,7 @@ GKE Cluster Lifecycle Script
 
 Usage:
   ./cluster.sh create  [--dry-run]   VPC + subnet + cluster + secondary pool + shared configs
-  ./cluster.sh apply   [--dry-run]   Apply k8s/secondary/ manifests
+  ./cluster.sh apply   [--dry-run]   Apply gke/secondary/ manifests
   ./cluster.sh delete  [--dry-run]   Delete cluster (preserves VPC)
   ./cluster.sh status                Show cluster + node pool info
 

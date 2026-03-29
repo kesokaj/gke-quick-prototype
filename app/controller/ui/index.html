@@ -1,0 +1,1141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sandbox Controller</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css">
+  <style>
+    :root {
+      --bg: #0f1117; --card: #1a1d28; --border: #2d3142; --text: #e0e0e0; --dim: #8a8fa0;
+      --accent: #6366f1; --green: #22c55e; --red: #ef4444; --amber: #f59e0b; --blue: #3b82f6;
+    }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { font-family: -apple-system,'Segoe UI',Roboto,monospace; background:var(--bg); color:var(--text); }
+
+    .header { display:flex; justify-content:space-between; align-items:center; padding:16px 24px; border-bottom:1px solid var(--border); }
+    .header h1 { font-size:18px; font-weight:600; }
+    .header-right { display:flex; align-items:center; gap:12px; }
+    .pool-ctrl { display:flex; align-items:center; gap:6px; background:var(--card); border:1px solid var(--border); border-radius:8px; padding:4px 8px; }
+    .pool-ctrl label { font-size:11px; color:var(--dim); text-transform:uppercase; }
+    .pool-ctrl input { width:48px; background:var(--bg); border:1px solid var(--border); border-radius:4px; padding:4px 6px; color:var(--text); font-size:13px; text-align:center; -moz-appearance:textfield; }
+    .pool-ctrl input::-webkit-inner-spin-button, .pool-ctrl input::-webkit-outer-spin-button { -webkit-appearance:none; margin:0; }
+    .pool-ctrl .btn-restart { background:#e74c3c; font-size:10px; padding:4px 8px; }
+    .pool-ctrl .btn-restart:hover { background:#c0392b; }
+    .pool-ctrl button { background:var(--accent); color:#fff; border:none; border-radius:4px; padding:4px 10px; cursor:pointer; font-size:11px; font-weight:600; }
+
+    .stats { display:grid; grid-template-columns:repeat(6,1fr); gap:12px; padding:16px 24px; }
+    .stat { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:16px; }
+    .stat-label { font-size:11px; text-transform:uppercase; color:var(--dim); letter-spacing:.5px; }
+    .stat-value { font-size:28px; font-weight:700; margin-top:4px; transition:color .3s; }
+    .stat-value.idle { color:var(--green); } .stat-value.active { color:var(--blue); }
+    .stat-value.pending { color:var(--amber); }
+    .stat-value.failed { color:var(--red); }
+
+    .metrics-bar { display:grid; grid-template-columns:1fr 1fr; gap:12px; padding:0 24px 12px; }
+    .metric-card { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:14px 16px; }
+    .metric-card h3 { font-size:12px; color:var(--dim); text-transform:uppercase; letter-spacing:.5px; margin-bottom:10px; display:flex; align-items:center; gap:6px; }
+    .metric-card h3 .count { font-size:10px; background:var(--border); border-radius:10px; padding:1px 7px; color:var(--text); }
+    .percentiles { display:flex; gap:16px; }
+    .pct { text-align:center; }
+    .pct-label { font-size:10px; color:var(--dim); text-transform:uppercase; }
+    .pct-value { font-size:22px; font-weight:700; margin-top:2px; }
+    .pct-value.fast { color:var(--green); }
+    .pct-value.medium { color:var(--amber); }
+    .pct-value.slow { color:var(--red); }
+    .pct-unit { font-size:11px; color:var(--dim); margin-left:1px; }
+    .metric-avg { font-size:11px; color:var(--dim); margin-top:6px; }
+    .sched-col { font-size:11px; font-family:monospace; }
+    .sched-fast { color:var(--green); }
+    .sched-mid { color:var(--amber); }
+    .sched-slow { color:var(--red); }
+
+    .toolbar { padding:8px 24px; display:flex; gap:12px; align-items:center; }
+    .search-box { flex:1; max-width:300px; background:var(--card); border:1px solid var(--border); border-radius:6px; padding:8px 12px; color:var(--text); font-size:13px; }
+    .search-box::placeholder { color:var(--dim); }
+    .btn { display:inline-flex; align-items:center; gap:6px; padding:8px 16px; border-radius:6px; border:none; cursor:pointer; font-size:13px; font-weight:600; transition:opacity .2s; }
+    .btn:hover { opacity:.85; } .btn-primary { background:var(--green); color:#000; }
+    .btn-danger { background:var(--red); color:#fff; font-size:11px; padding:4px 10px; }
+    .btn-amber { background:var(--amber); color:#000; font-size:11px; padding:4px 10px; }
+    .btn-secondary { background:var(--border); color:var(--text); }
+    .btn-sm { font-size:11px; padding:4px 10px; }
+
+    /* Modal */
+    .modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.7); z-index:100; justify-content:center; align-items:center; }
+    .modal-overlay.active { display:flex; }
+    .modal { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:24px; width:440px; max-height:80vh; overflow-y:auto; }
+    .modal h2 { font-size:16px; margin-bottom:16px; }
+    .fg { margin-bottom:14px; }
+    .fg label { display:block; font-size:12px; color:var(--dim); text-transform:uppercase; letter-spacing:.5px; margin-bottom:4px; }
+    .fg input,.fg textarea { width:100%; background:var(--bg); border:1px solid var(--border); border-radius:6px; padding:8px 12px; color:var(--text); font-family:inherit; font-size:13px; }
+    .fg textarea { min-height:60px; resize:vertical; }
+    .fg .hint { font-size:11px; color:var(--dim); margin-top:3px; }
+    .modal-actions { display:flex; gap:12px; justify-content:flex-end; margin-top:20px; }
+
+    .table-wrap { padding:0 24px 24px; overflow-x:auto; }
+    table { width:100%; border-collapse:collapse; font-size:13px; }
+    thead th { text-align:left; padding:8px 10px; color:var(--dim); font-size:11px; text-transform:uppercase; letter-spacing:.5px; border-bottom:1px solid var(--border); position:sticky; top:0; background:var(--bg); }
+    tbody td { padding:8px 10px; border-bottom:1px solid var(--border); vertical-align:top; white-space:nowrap; transition:background .3s; }
+    tr.row-flash td { background:rgba(99,102,241,.08); }
+    .state-badge { padding:2px 8px; border-radius:4px; font-size:11px; font-weight:600; }
+    .state-running { background:rgba(34,197,94,.15); color:var(--green); }
+    .state-claimed,.state-active,.state-provisioning { background:rgba(59,130,246,.15); color:var(--blue); }
+    .state-pending,.state-containercreating { background:rgba(245,158,11,.15); color:var(--amber); }
+    .state-failed,.state-error,.state-crashloopbackoff { background:rgba(239,68,68,.15); color:var(--red); }
+    .state-idle { background:rgba(138,143,160,.15); color:var(--dim); }
+    .metrics { font-size:11px; color:var(--dim); }
+    .metrics span { margin-right:8px; }
+    .config-info { font-size:11px; color:var(--dim); }
+    .config-info span { display:inline-block; margin-right:8px; }
+    .expires { font-size:11px; color:var(--amber); }
+    .expires.unlimited { color:var(--green); }
+    tr.hidden { display:none; }
+    .actions-cell { display:flex; gap:4px; flex-wrap:wrap; }
+
+    .toast { position:fixed; bottom:16px; right:16px; background:var(--card); border:1px solid var(--border); padding:8px 14px; border-radius:6px; font-size:12px; color:var(--dim); z-index:50; transition:opacity .3s; }
+    .toast.success { border-color:var(--green); color:var(--green); }
+    .toast.error { border-color:var(--red); color:var(--red); }
+
+    .preset-btns { display:flex; gap:4px; margin-left:8px; }
+    .preset-btns button { background:transparent; border:1px solid var(--border); border-radius:4px; padding:3px 8px; color:var(--dim); font-size:10px; cursor:pointer; transition:all .15s; }
+    .preset-btns button:hover { border-color:var(--accent); color:var(--accent); }
+
+    .modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:100; align-items:center; justify-content:center; }
+    .modal-overlay.active { display:flex; }
+    .modal { background:var(--card); border:1px solid var(--border); border-radius:10px; width:700px; max-width:90vw; max-height:80vh; display:flex; flex-direction:column; }
+    .modal-header { display:flex; justify-content:space-between; align-items:center; padding:12px 16px; border-bottom:1px solid var(--border); }
+    .modal-header h3 { margin:0; font-size:14px; }
+    .modal-header button { background:none; border:none; color:var(--dim); cursor:pointer; font-size:18px; }
+    .modal-body { padding:16px; overflow-y:auto; flex:1; }
+    .modal-body pre { background:var(--bg); padding:12px; border-radius:6px; font-size:11px; line-height:1.5; white-space:pre-wrap; word-break:break-all; color:var(--text); max-height:400px; overflow-y:auto; margin:0; }
+    .modal-body .event-row { display:flex; gap:12px; padding:6px 0; border-bottom:1px solid var(--border); font-size:11px; }
+    .modal-body .event-row .type { min-width:50px; font-weight:600; }
+    .modal-body .event-row .type.Warning { color:var(--amber); }
+    .modal-body .event-row .type.Normal { color:var(--green); }
+    .modal-body .event-row .reason { min-width:100px; color:var(--blue); }
+    .modal-body .event-row .msg { flex:1; color:var(--dim); }
+    .modal-body .event-row .age { min-width:60px; color:var(--dim); text-align:right; }
+    .modal-body .conn-info { background:var(--bg); padding:12px; border-radius:6px; font-family:monospace; font-size:12px; color:var(--green); cursor:pointer; }
+    .modal-body .conn-info:hover { background:rgba(34,197,94,.1); }
+
+    /* SQL Console */
+    .sql-modal { width:800px; max-width:95vw; }
+    .sql-input { width:100%; min-height:80px; max-height:200px; background:var(--bg); border:1px solid var(--border); border-radius:6px; padding:10px 12px; color:var(--green); font-family:'SF Mono',Monaco,Consolas,monospace; font-size:13px; resize:vertical; }
+    .sql-input:focus { outline:none; border-color:var(--accent); }
+    .sql-toolbar { display:flex; gap:8px; align-items:center; margin:8px 0; }
+    .sql-toolbar select { background:var(--bg); border:1px solid var(--border); border-radius:4px; padding:4px 8px; color:var(--text); font-size:12px; }
+    .sql-result { background:var(--bg); border:1px solid var(--border); border-radius:6px; padding:12px; font-family:'SF Mono',Monaco,Consolas,monospace; font-size:12px; line-height:1.5; white-space:pre-wrap; word-break:break-all; color:var(--text); max-height:400px; overflow-y:auto; margin-top:8px; }
+    .sql-result.error { color:var(--red); border-color:var(--red); }
+    .sql-result.empty { color:var(--dim); font-style:italic; }
+    .pg-conn { font-size:10px; font-family:monospace; color:var(--green); cursor:pointer; padding:2px 6px; background:rgba(34,197,94,.1); border-radius:3px; display:inline-block; margin-top:2px; }
+    .pg-conn:hover { background:rgba(34,197,94,.2); }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <h1>🔥 Sandbox Controller</h1>
+  <div class="header-right">
+    <div class="pool-ctrl">
+      <label>Pool Size</label>
+      <div class="preset-btns">
+        <button onclick="quickPool(5)">5</button>
+        <button onclick="quickPool(50)">50</button>
+        <button onclick="quickPool(100)">100</button>
+        <button onclick="quickPool(200)">200</button>
+        <button onclick="quickPool(500)">500</button>
+      </div>
+      <input type="number" id="poolSizeInput" value="{{.PoolSize}}" min="0">
+      <button onclick="setPoolSize()">Set</button>
+      <button class="btn-restart" onclick="restartPool()" title="Scale to 0, then back up">♻ Restart</button>
+    </div>
+  </div>
+</div>
+
+<div class="stats" id="statsBar">
+  <div class="stat"><div class="stat-label">Ready</div><div class="stat-value idle" id="statIdle">—</div></div>
+  <div class="stat"><div class="stat-label">Pending</div><div class="stat-value pending" id="statPending">—</div></div>
+  <div class="stat"><div class="stat-label">Claimed</div><div class="stat-value active" id="statActive">—</div></div>
+  <div class="stat"><div class="stat-label">Failed</div><div class="stat-value failed" id="statFailed">—</div></div>
+  <div class="stat"><div class="stat-label">Total</div><div class="stat-value" id="statTotal">—</div></div>
+  <div class="stat"><div class="stat-label">Pool Target</div><div class="stat-value" id="statPoolSize">—</div></div>
+</div>
+
+<div class="metrics-bar" id="metricsBar">
+  <div class="metric-card">
+    <h3>⚡ Schedule Duration <span class="count" id="schedCount">0 samples</span></h3>
+    <div class="percentiles">
+      <div class="pct"><div class="pct-label">p50</div><div class="pct-value" id="schedP50">—</div></div>
+      <div class="pct"><div class="pct-label">p95</div><div class="pct-value" id="schedP95">—</div></div>
+      <div class="pct"><div class="pct-label">p99</div><div class="pct-value" id="schedP99">—</div></div>
+    </div>
+    <div class="metric-avg" id="schedAvg">avg: —</div>
+  </div>
+  <div class="metric-card">
+    <h3>🚀 Claim → Ready <span class="count" id="claimCount">0 samples</span></h3>
+    <div class="percentiles">
+      <div class="pct"><div class="pct-label">p50</div><div class="pct-value" id="claimP50">—</div></div>
+      <div class="pct"><div class="pct-label">p95</div><div class="pct-value" id="claimP95">—</div></div>
+      <div class="pct"><div class="pct-label">p99</div><div class="pct-value" id="claimP99">—</div></div>
+    </div>
+    <div class="metric-avg" id="claimAvg">avg: —</div>
+  </div>
+  <div style="display:flex;align-items:center;margin-left:auto;">
+    <button class="btn" style="background:#e74c3c;color:#fff;border:none;border-radius:6px;padding:8px 14px;cursor:pointer;font-size:12px;font-weight:600;" onclick="resetMetrics()" title="Reset all metric counters">🗑 Reset Metrics</button>
+  </div>
+</div>
+
+<div class="toolbar">
+  <input type="text" class="search-box" id="searchBox" placeholder="🔍 Search sandboxes..." oninput="filterTable()">
+  <button class="btn btn-primary" onclick="openProvision()">+ Provision Sandbox</button>
+</div>
+
+<!-- Provision Modal -->
+<div class="modal-overlay" id="provisionModal">
+  <div class="modal">
+    <h2>🆕 Provision New Sandbox</h2>
+    <form id="provisionForm" onsubmit="submitProvision(event)">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div class="fg">
+          <label>Count</label>
+          <input type="number" name="count" value="1" min="1" max="500" placeholder="1">
+          <div class="hint">Number of sandboxes to claim (1–500)</div>
+        </div>
+        <div class="fg">
+          <label>Lifetime (TTL)</label>
+          <input type="text" name="lifetime" value="5m" placeholder="5m, 1h, 30m">
+          <div class="hint">Duration (5m, 1h, 24h) or "unlimited" (max 24h cap)</div>
+        </div>
+      </div>
+      <div class="fg" style="margin-top:12px">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="checkbox" name="autoscale" style="width:16px;height:16px;accent-color:var(--green)">
+          Autoscale warmpool to match count
+        </label>
+        <div class="hint">Sets the pool size equal to the provisioned count</div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" onclick="closeProvision()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Provision</button>
+      </div>
+    </form>
+    <div id="provisionResult" style="display:none;margin-top:16px;padding:12px;background:var(--bg);border-radius:6px;font-size:12px;"></div>
+  </div>
+</div>
+
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Name</th><th>State</th><th>Image</th><th>Age</th><th>Node</th><th>IP</th>
+        <th>CPU/Mem</th><th>Config</th><th>Claimed</th><th>Expires</th><th>Actions</th>
+      </tr>
+    </thead>
+    <tbody id="sandboxTable"></tbody>
+  </table>
+</div>
+
+<div class="toast" id="toast" style="opacity:0;">Ready</div>
+
+<!-- Detail Modal -->
+<div class="modal-overlay" id="detailModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>Details</h3>
+      <button onclick="closeDetailModal()">✕</button>
+    </div>
+    <div class="modal-body"></div>
+  </div>
+</div>
+
+<!-- Terminal Modal -->
+<div class="modal-overlay" id="terminalModal" style="z-index:10001">
+  <div class="modal" style="width:min(900px,90vw);max-width:900px;padding:0;overflow:hidden">
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border);background:var(--card)">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:16px">🖥️</span>
+        <h3 id="terminalTitle" style="font-size:14px;font-weight:600;margin:0">Terminal</h3>
+      </div>
+      <button onclick="closeTerminal()" style="background:none;border:none;color:var(--dim);font-size:20px;cursor:pointer;padding:4px">✕</button>
+    </div>
+    <div id="terminalContainer" style="padding:4px;background:#000"></div>
+  </div>
+</div>
+
+<!-- SQL Console Modal -->
+<div class="modal-overlay" id="sqlModal">
+  <div class="modal sql-modal">
+    <div class="modal-header">
+      <h3 id="sqlModalTitle">SQL Console</h3>
+      <button onclick="closeSqlModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="sql-toolbar">
+        <select id="sqlDbSelect">
+          <option value="sandbox">sandbox</option>
+        </select>
+        <button class="btn btn-primary btn-sm" onclick="runQuery()">▶ Run</button>
+        <span style="font-size:11px;color:var(--dim);margin-left:auto">Ctrl+Enter to execute</span>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px">
+        <button class="btn btn-sm" style="background:var(--border);color:var(--text);font-size:10px" onclick="quickSql('SELECT datname, pg_size_pretty(pg_database_size(datname)) AS size FROM pg_database ORDER BY datname;')" title="List all databases">📦 Databases</button>
+        <button class="btn btn-sm" style="background:var(--border);color:var(--text);font-size:10px" onclick="quickSql(`SELECT schemaname, tablename, pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) AS size FROM pg_tables WHERE schemaname NOT IN ('pg_catalog','information_schema') ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC;`)" title="List user tables with sizes">📋 Tables</button>
+        <button class="btn btn-sm" style="background:var(--border);color:var(--text);font-size:10px" onclick="quickSql(`SELECT table_name, column_name, data_type, is_nullable FROM information_schema.columns WHERE table_schema = 'public' ORDER BY table_name, ordinal_position;`)" title="Show public schema columns">🏗 Schema</button>
+        <button class="btn btn-sm" style="background:var(--border);color:var(--text);font-size:10px" onclick="quickSql(`SELECT pg_size_pretty(pg_database_size(current_database())) AS db_size, (SELECT count(*) FROM pg_tables WHERE schemaname = 'public') AS tables, (SELECT count(*) FROM pg_stat_activity WHERE datname = current_database()) AS connections;`)" title="Database overview">📊 Overview</button>
+        <button class="btn btn-sm" style="background:var(--border);color:var(--text);font-size:10px" onclick="quickSql('SELECT version();')" title="Sandbox version">🏷 Version</button>
+        <button class="btn btn-sm" style="background:var(--border);color:var(--text);font-size:10px" onclick="quickSql('SELECT pid, usename, datname, state, query_start, left(query,80) AS query FROM pg_stat_activity WHERE datname IS NOT NULL ORDER BY query_start DESC;')" title="Active connections">🔌 Connections</button>
+        <button class="btn btn-sm" style="background:var(--border);color:var(--text);font-size:10px" onclick="quickSql(`SELECT name, setting, unit, short_desc FROM pg_settings WHERE name IN ('shared_buffers','work_mem','max_connections','listen_addresses','port','wal_level','max_wal_senders') ORDER BY name;`)" title="Key settings">⚙ Settings</button>
+        <button class="btn btn-sm" style="background:var(--border);color:var(--text);font-size:10px" onclick="quickSql(`SELECT schemaname, relname, seq_scan, seq_tup_read, idx_scan, idx_tup_fetch, n_tup_ins, n_tup_upd, n_tup_del FROM pg_stat_user_tables ORDER BY seq_scan DESC LIMIT 20;`)" title="Table statistics">📈 Stats</button>
+      </div>
+      <textarea class="sql-input" id="sqlInput" placeholder="SELECT version();" spellcheck="false"></textarea>
+      <div class="sql-result empty" id="sqlResult">Results will appear here...</div>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = '';
+
+// --- Data Fetch (no full-page refresh) ---
+async function fetchStatus() {
+  try {
+    const res = await fetch(`${API}/api/status`);
+    const d = await res.json();
+    document.getElementById('statIdle').textContent = d.idle;
+    document.getElementById('statPending').textContent = d.pending;
+    document.getElementById('statActive').textContent = d.active;
+    document.getElementById('statFailed').textContent = d.failed;
+    document.getElementById('statTotal').textContent = d.total;
+    document.getElementById('statPoolSize').textContent = d.poolSize;
+    // Only update pool size input if it is NOT focused (prevents auto-revert while editing).
+    const poolInput = document.getElementById('poolSizeInput');
+    if (document.activeElement !== poolInput) {
+      poolInput.value = d.poolSize;
+    }
+  } catch(e) { console.error('status fetch error', e); }
+}
+
+async function fetchSandboxes() {
+  try {
+    const res = await fetch(`${API}/api/sandboxes`);
+    const sandboxes = await res.json();
+    renderTable(sandboxes || []);
+  } catch(e) { console.error('sandboxes fetch error', e); }
+}
+
+function renderTable(sandboxes) {
+  const tbody = document.getElementById('sandboxTable');
+  const search = (document.getElementById('searchBox').value || '').toLowerCase();
+
+  // Sort: active first, then idle, then failed; by name within each group.
+  sandboxes.sort((a,b) => {
+    const order = {active:0, provisioning:0, failed:1, idle:2};
+    const d = (order[a.state]||3) - (order[b.state]||3);
+    return d !== 0 ? d : a.name.localeCompare(b.name);
+  });
+
+  // Build a map of desired rows keyed by sandbox name.
+  const desiredNames = new Set();
+  const rowData = sandboxes.map(sb => {
+    desiredNames.add(sb.name);
+    const hidden = search && !sb.name.toLowerCase().includes(search) && !sb.state.toLowerCase().includes(search) && !(sb.node||'').toLowerCase().includes(search);
+    return { sb, hidden };
+  });
+
+  // Remove rows that no longer exist.
+  const existingRows = tbody.querySelectorAll('tr[data-id]');
+  existingRows.forEach(row => {
+    if (!desiredNames.has(row.dataset.id)) {
+      row.style.opacity = '0';
+      setTimeout(() => row.remove(), 200);
+    }
+  });
+
+  // Update or insert rows in order.
+  rowData.forEach(({ sb, hidden }, idx) => {
+    let row = tbody.querySelector(`tr[data-id="${sb.name}"]`);
+    const isNew = !row;
+
+    if (isNew) {
+      row = document.createElement('tr');
+      row.dataset.id = sb.name;
+      row.style.opacity = '0';
+      // Insert 11 cells for all columns.
+      for (let c = 0; c < 11; c++) row.appendChild(document.createElement('td'));
+    }
+
+    row.className = hidden ? 'hidden' : '';
+    const cells = row.children;
+
+    const nodeShort = (sb.node||'—').replace(/gke-sandbox-gke-/,'').replace(/secondary-pool-/,'pool-');
+    const ageMs = Date.now() - new Date(sb.createdAt).getTime();
+    const ageSecs = Math.floor(ageMs / 1000);
+
+    // Cell 0: Name
+    updateCell(cells[0], sb.name, 'font-size:12px');
+    // Cell 1: State badge
+    updateCell(cells[1], `<span class="state-badge ${stateClass(sb)}">${stateLabel(sb)}</span>`);
+    // Cell 2: Image tag
+    updateCell(cells[2], sb.imageTag||'—', 'font-size:10px;font-family:monospace;color:var(--dim)');
+    // Cell 3: Age
+    updateCell(cells[3], `<span class="sched-col">${formatCompact(ageSecs)}</span>`);
+    // Cell 4: Node
+    updateCell(cells[4], nodeShort, 'font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis');
+    // Cell 5: IP
+    updateCell(cells[5], sb.podIP||'—');
+
+    // Cell 6: CPU/Mem
+    let metricsHtml = '—';
+    if (sb.metrics) {
+      metricsHtml = `<div class="metrics"><span>⚡${sb.metrics.cpuMillis}m</span><span>🧠${sb.metrics.memoryMiB}Mi</span></div>`;
+    }
+    updateCell(cells[6], metricsHtml);
+
+    // Cell 7: Config
+    let configHtml = '—';
+    if (sb.config) {
+      const parts = [`⏱ ${sb.config.lifetime}`];
+      configHtml = `<div class="config-info">${parts.map(p=>`<span>${p}</span>`).join('')}</div>`;
+    }
+    updateCell(cells[7], configHtml);
+
+    // Cell 8: Claimed duration
+    let claimedHtml = '—';
+    if (sb.detachedAt && (sb.state === 'active' || sb.state === 'provisioning')) {
+      const elapsed = Date.now() - new Date(sb.detachedAt).getTime();
+      claimedHtml = `<span style="color:var(--blue)">${formatDuration(elapsed)}</span>`;
+    }
+    updateCell(cells[8], claimedHtml);
+
+    // Cell 9: Expires
+    let expiresHtml = '—';
+    if (sb.config && sb.config.lifetime === 'unlimited') {
+      expiresHtml = '<span class="expires unlimited">∞ unlimited</span>';
+    } else if (sb.expiresAt) {
+      const remaining = new Date(sb.expiresAt).getTime() - Date.now();
+      if (remaining > 0) {
+        expiresHtml = `<span class="expires">${formatCompact(Math.floor(remaining/1000))} left</span>`;
+      } else {
+        expiresHtml = '<span class="expires" style="color:var(--red)">expired</span>';
+      }
+    }
+    updateCell(cells[9], expiresHtml);
+
+    // Cell 10: Actions (always rebuild — buttons have event handlers)
+    const isClaimed = sb.state==='active' || sb.state==='provisioning';
+
+    const actionsHtml = `<div class="actions-cell">
+      ${sb.state==='idle' ? `<button class="btn btn-primary btn-sm" onclick="provisionSpecific('${sb.name}')">Claim</button>` : ''}
+      <button class="btn btn-sm" style="background:#1a3a2a;color:#22c55e;border:1px solid #22c55e44" onclick="openTerminal('${sb.name}')" title="Open bash terminal">🖥️</button>
+      <button class="btn btn-sm" style="background:var(--border);color:var(--text)" onclick="showLogs('${sb.name}')">📋</button>
+      <button class="btn btn-sm" style="background:var(--border);color:var(--text)" onclick="showEvents('${sb.name}')">📡</button>
+      <button class="btn btn-danger btn-sm" onclick="deleteSandbox('${sb.name}')">✕</button>
+    </div>`;
+    cells[10].innerHTML = actionsHtml;
+
+    // Insert new row at correct position.
+    if (isNew) {
+      const refRow = tbody.children[idx];
+      if (refRow) tbody.insertBefore(row, refRow);
+      else tbody.appendChild(row);
+      // Fade in.
+      requestAnimationFrame(() => { row.style.transition = 'opacity .3s'; row.style.opacity = '1'; });
+    }
+  });
+}
+
+// Update a cell's content only if it changed (avoids DOM thrash).
+function updateCell(td, html, style) {
+  if (style !== undefined) td.setAttribute('style', style);
+  if (td.innerHTML !== html) td.innerHTML = html;
+}
+
+// --- Detail modal ---
+var modalOverlay; // initialized after DOM ready
+
+function filterTable() {
+  fetchSandboxes(); // re-render with search filter applied
+}
+
+// --- Pool Size ---
+async function setPoolSize() {
+  const size = parseInt(document.getElementById('poolSizeInput').value);
+  if (isNaN(size) || size < 0) { toast('Invalid pool size','error'); return; }
+  try {
+    const res = await fetch(`${API}/api/pool-size`, {
+      method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({size})
+    });
+    const d = await res.json();
+    if (res.ok) { toast(`Pool size → ${d.poolSize}`, 'success'); refresh(); }
+    else toast(d.error, 'error');
+  } catch(e) { toast('Failed: '+e, 'error'); }
+}
+
+// --- Provision ---
+function openProvision() { document.getElementById('provisionModal').classList.add('active'); }
+function closeProvision() {
+  document.getElementById('provisionModal').classList.remove('active');
+  document.getElementById('provisionResult').style.display = 'none';
+}
+
+async function submitProvision(e) {
+  e.preventDefault();
+  const form = e.target;
+  const count = parseInt(form.count.value) || 1;
+  const lifetime = form.lifetime.value || '5m';
+  const autoscale = form.autoscale.checked;
+  const result = document.getElementById('provisionResult');
+
+  // Autoscale: set pool size, then wait for pods to become idle
+  if (autoscale && count > 1) {
+    try {
+      await fetch(`${API}/api/pool-size`, {
+        method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({size:count}),
+      });
+      document.getElementById('poolSizeInput').value = count;
+      toast(`Pool size → ${count}, waiting for pods...`, 'info');
+    } catch(err) { toast('Failed to set pool size', 'error'); return; }
+
+    // Poll until enough idle pods are available
+    result.style.display = 'block';
+    const maxWait = 180; // 3 minutes max
+    const started = Date.now();
+    while ((Date.now() - started) / 1000 < maxWait) {
+      try {
+        const sr = await fetch(`${API}/api/status`);
+        const st = await sr.json();
+        const idle = st.idle || 0;
+        const elapsed = Math.round((Date.now() - started) / 1000);
+        result.innerHTML = `<div style="color:var(--blue)">⏳ Waiting for pool: <strong>${idle}/${count}</strong> idle (${elapsed}s)</div>`;
+        if (idle >= count) break;
+      } catch(e) {}
+      await new Promise(r => setTimeout(r, 3000));
+    }
+  }
+
+  if (count === 1) {
+    await doProvision({ lifetime });
+  } else {
+    await doProvisionBatch(count, { lifetime });
+  }
+}
+
+async function provisionSpecific(name) {
+  // Quick-claim: always use 5m default lifetime.
+  await doProvision({ lifetime: '5m' });
+}
+
+async function doProvision(body) {
+  try {
+    const res = await fetch(`${API}/api/provision`, {
+      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    const result = document.getElementById('provisionResult');
+    if (res.ok) {
+      toast(`Provisioned: ${data.name}`, 'success');
+      result.innerHTML = `<div style="color:var(--green)">✅ <strong>${data.name}</strong></div>`;
+      result.style.display = 'block';
+      setTimeout(closeProvision, 1500);
+    } else {
+      toast(data.error, 'error');
+      result.innerHTML = `<div style="color:var(--red)">❌ ${data.error}</div>`;
+      result.style.display = 'block';
+    }
+    refresh();
+  } catch(e) { toast('Failed: '+e, 'error'); }
+}
+
+async function doProvisionBatch(count, body) {
+  const result = document.getElementById('provisionResult');
+  result.innerHTML = `<div style="color:var(--amber)">⏳ Provisioning ${count} sandboxes...</div>`;
+  result.style.display = 'block';
+
+  let succeeded = 0, failed = 0;
+  const names = [];
+  const concurrency = 5;
+
+  // Process in batches of `concurrency`
+  for (let i = 0; i < count; i += concurrency) {
+    const batch = Math.min(concurrency, count - i);
+    const promises = [];
+    for (let j = 0; j < batch; j++) {
+      promises.push(
+        fetch(`${API}/api/provision`, {
+          method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body),
+        }).then(async r => {
+          const d = await r.json();
+          if (r.ok) { succeeded++; names.push(d.name); }
+          else { failed++; }
+        }).catch(() => { failed++; })
+      );
+    }
+    await Promise.all(promises);
+    result.innerHTML = `<div style="color:var(--amber)">⏳ ${succeeded + failed}/${count} — ${succeeded} ok, ${failed} failed</div>`;
+  }
+
+  if (failed === 0) {
+    toast(`Provisioned ${succeeded} sandboxes`, 'success');
+    result.innerHTML = `<div style="color:var(--green)">✅ ${succeeded} sandboxes provisioned</div>`;
+    setTimeout(closeProvision, 2000);
+  } else {
+    toast(`${succeeded} ok, ${failed} failed`, succeeded > 0 ? 'success' : 'error');
+    result.innerHTML = `<div style="color:var(--amber)">⚠ ${succeeded} provisioned, ${failed} failed</div>`;
+  }
+  refresh();
+}
+
+
+
+// --- Delete ---
+async function deleteSandbox(name) {
+  try {
+    const res = await fetch(`${API}/api/sandboxes/${name}`, { method: 'DELETE' });
+    const d = await res.json();
+    if (res.ok) toast(`Deleted: ${name}`, 'success');
+    else toast(d.error, 'error');
+    refresh();
+  } catch(e) { toast('Failed: '+e, 'error'); }
+}
+
+// --- Toast ---
+function toast(msg, type='') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'toast' + (type ? ' '+type : '');
+  el.style.opacity = '1';
+  setTimeout(() => el.style.opacity = '0', 3000);
+}
+
+// --- State Badge Helpers ---
+// Maps K8s pod phase + controller state to CSS class and display label.
+function stateClass(sb) {
+  // Claimed pods → blue.
+  if (sb.state === 'active' || sb.state === 'provisioning') return 'state-claimed';
+  // Failed → red.
+  if (sb.state === 'failed') return 'state-failed';
+  // Use K8s phase for idle/ready pods.
+  const phase = (sb.phase || '').toLowerCase();
+  if (phase === 'running') return 'state-running';
+  if (phase === 'pending') return 'state-pending';
+  if (phase === 'failed' || phase === 'unknown') return 'state-failed';
+  // Default (no phase yet).
+  return 'state-idle';
+}
+
+function stateLabel(sb) {
+  if (sb.state === 'active') return 'Claimed';
+  if (sb.state === 'provisioning') return 'Claiming';
+  if (sb.state === 'failed') return 'Failed';
+  if (sb.state === 'idle') return 'Ready';
+  if (sb.state === 'pending') return 'Pending';
+  return sb.phase || sb.state;
+}
+
+// --- PG Status ---
+function pgStatus(sb) {
+  if (sb.state === 'idle') return '<span style="color:var(--dim)">Standby</span>';
+  if (sb.state === 'active' || sb.state === 'provisioning') {
+    if (sb.ready) {
+      const connStr = `curl http:// ${sb.podIP||'?'} -p 3004 -U sandbox -d sandbox`;
+      return `<span style="color:var(--green)">✅ Ready</span>
+        <div class="pg-conn" onclick="navigator.clipboard.writeText('${connStr}');toast('Copied!','success')" title="Click to copy">${sb.podIP}:3004</div>`;
+    }
+    return '<span style="color:var(--amber)">⏳ Starting</span>';
+  }
+  if (sb.state === 'failed') return '<span style="color:var(--red)">Down</span>';
+  return '—';
+}
+
+// --- Duration Format ---
+function formatDuration(ms) {
+  const s = Math.floor(ms/1000);
+  const d = Math.floor(s/86400);
+  const h = Math.floor((s%86400)/3600);
+  const m = Math.floor((s%3600)/60);
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+
+// Compact: e.g. 65s → "1m 5s", 3700s → "1h 1m"
+function formatCompact(totalSecs) {
+  if (totalSecs < 60) return `${totalSecs}s`;
+  const m = Math.floor(totalSecs / 60);
+  const s = totalSecs % 60;
+  if (m < 60) return `${m}m ${s}s`;
+  const h = Math.floor(m / 60);
+  const rm = m % 60;
+  return `${h}h ${rm}m`;
+}
+
+// Color class based on seconds threshold.
+function speedClass(secs) {
+  if (secs <= 5) return 'fast';
+  if (secs <= 15) return 'medium';
+  return 'slow';
+}
+
+// Format seconds for display.
+function fmtSec(v) {
+  if (v === 0 || v === undefined) return '—';
+  return `${v}s`;
+}
+
+// --- Metrics Summary ---
+async function fetchMetricsSummary() {
+  try {
+    const res = await fetch(`${API}/api/metrics/summary`);
+    const d = await res.json();
+    const s = d.scheduleDuration || {};
+    const c = d.claimToReady || {};
+
+    document.getElementById('schedCount').textContent = `${s.count || 0} samples`;
+    document.getElementById('schedP50').className = `pct-value ${speedClass(s.p50)}`;
+    document.getElementById('schedP50').innerHTML = fmtSec(s.p50);
+    document.getElementById('schedP95').className = `pct-value ${speedClass(s.p95)}`;
+    document.getElementById('schedP95').innerHTML = fmtSec(s.p95);
+    document.getElementById('schedP99').className = `pct-value ${speedClass(s.p99)}`;
+    document.getElementById('schedP99').innerHTML = fmtSec(s.p99);
+    document.getElementById('schedAvg').textContent = `avg: ${s.avg ? s.avg + 's' : '—'}`;
+
+    document.getElementById('claimCount').textContent = `${c.count || 0} samples`;
+    document.getElementById('claimP50').className = `pct-value ${speedClass(c.p50)}`;
+    document.getElementById('claimP50').innerHTML = fmtSec(c.p50);
+    document.getElementById('claimP95').className = `pct-value ${speedClass(c.p95)}`;
+    document.getElementById('claimP95').innerHTML = fmtSec(c.p95);
+    document.getElementById('claimP99').className = `pct-value ${speedClass(c.p99)}`;
+    document.getElementById('claimP99').innerHTML = fmtSec(c.p99);
+    document.getElementById('claimAvg').textContent = `avg: ${c.avg ? c.avg + 's' : '—'}`;
+  } catch(e) { console.error('metrics summary fetch error', e); }
+}
+
+// --- Quick Pool Presets ---
+async function quickPool(n) {
+  document.getElementById('poolSizeInput').value = n;
+  await setPoolSize();
+}
+
+async function restartPool() {
+  const current = parseInt(document.getElementById('poolSizeInput').value);
+  if (!current || current <= 0) { toast('Pool size is already 0', 'error'); return; }
+  if (!confirm(`Restart pool? This will scale to 0 then back to ${current}.`)) return;
+  try {
+    toast('Scaling to 0...', 'info');
+    await fetch(`${API}/api/pool-size`, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({size:0}) });
+    await new Promise(r => setTimeout(r, 3000));
+    toast(`Scaling back to ${current}...`, 'info');
+    const res = await fetch(`${API}/api/pool-size`, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({size:current}) });
+    const d = await res.json();
+    if (res.ok) { toast(`Pool restarted → ${d.poolSize}`, 'success'); }
+    else toast(d.error, 'error');
+    refresh();
+  } catch(e) { toast('Restart failed: '+e, 'error'); }
+}
+
+async function resetMetrics() {
+  if (!confirm('Reset all metric counters?')) return;
+  try {
+    const res = await fetch(`${API}/api/metrics/reset`, { method:'POST' });
+    if (res.ok) {
+      toast('Metrics reset', 'success');
+      refreshMetrics();
+    } else {
+      const d = await res.json();
+      toast(d.error || 'Failed', 'error');
+    }
+  } catch(e) { toast('Reset failed: '+e, 'error'); }
+}
+
+// --- Show Logs ---
+async function showLogs(name) {
+  try {
+    const res = await fetch(`${API}/api/sandboxes/${name}/logs`);
+    const d = await res.json();
+    if (!res.ok) { toast(d.error, 'error'); return; }
+    const raw = d.logs || '(empty)';
+    // Reverse lines so newest is on top, then format each line.
+    const lines = raw.split('\n').filter(l => l.trim()).reverse();
+    const phaseColors = {
+      'startup': 'var(--blue)', 'warmpool': 'var(--dim)', 'scenario': 'var(--accent)',
+      'download': '#f472b6', 'disk': '#fb923c', 'load': '#facc15',
+      'lifecycle': 'var(--green)', 'probe': 'var(--amber)', 'main': 'var(--text)'
+    };
+    const formatted = lines.map(line => {
+      try {
+        const obj = JSON.parse(line);
+        // Sandbox logs use ts/phase/msg/pod format.
+        const ts = obj.ts || obj.time || '';
+        const timeStr = ts ? ts.replace('T',' ').replace(/Z$/, '').replace(/\.[0-9]+$/, '') : '';
+        const phase = obj.phase || obj.level || '';
+        const msg = obj.msg || '';
+        const phaseColor = phaseColors[phase] || 'var(--dim)';
+        // Build extra fields (skip ts, phase, msg, pod).
+        const skipKeys = ['ts','time','phase','level','msg','pod'];
+        const extra = Object.keys(obj).filter(k => !skipKeys.includes(k))
+          .map(k => {
+            const v = typeof obj[k] === 'object' ? JSON.stringify(obj[k]) : String(obj[k]);
+            return `<span style="color:var(--dim)">${escHtml(k)}</span><span style="color:#636980">=</span><span style="color:var(--blue)">${escHtml(v.substring(0,100))}</span>`;
+          }).join(' ');
+        return `<div style="display:grid;grid-template-columns:170px 75px 1fr;gap:8px;padding:6px 8px;border-bottom:1px solid rgba(45,49,66,.5);font-size:11px;line-height:1.5;align-items:baseline">` +
+          `<span style="color:var(--dim);font-family:monospace;font-size:10px">${escHtml(timeStr)}</span>` +
+          `<span style="color:${phaseColor};font-weight:700;font-size:10px;text-transform:uppercase;letter-spacing:.3px">${escHtml(phase)}</span>` +
+          `<div><span style="color:var(--text);font-weight:500">${escHtml(msg)}</span>` +
+          (extra ? `<div style="margin-top:2px;font-size:10px;word-break:break-all">${extra}</div>` : '') +
+          `</div></div>`;
+      } catch(_) {
+        return `<div style="padding:4px 8px;font-size:11px;color:var(--dim);border-bottom:1px solid rgba(45,49,66,.3)">${escHtml(line)}</div>`;
+      }
+    }).join('');
+    openDetailModal(`Logs: ${name}`, `<div style="max-height:500px;overflow-y:auto;background:var(--bg);border-radius:6px;border:1px solid var(--border)">${formatted}</div>`);
+  } catch(e) { toast('Failed to fetch logs: '+e, 'error'); }
+}
+
+// --- Show Events ---
+async function showEvents(name) {
+  try {
+    const res = await fetch(`${API}/api/sandboxes/${name}/events`);
+    const d = await res.json();
+    if (!res.ok) { toast(d.error, 'error'); return; }
+    const events = d.events || [];
+    if (events.length === 0) {
+      openDetailModal(`Events: ${name}`, '<p style="color:var(--dim)">No events found.</p>');
+      return;
+    }
+    const html = events.map(e => `<div class="event-row">
+      <span class="type ${e.type}">${e.type}</span>
+      <span class="reason">${e.reason}</span>
+      <span class="msg">${escHtml(e.message)}</span>
+      <span class="age">${e.age}</span>
+    </div>`).join('');
+    openDetailModal(`Events: ${name}`, html);
+  } catch(e) { toast('Failed to fetch events: '+e, 'error'); }
+}
+
+
+
+// --- Show Credentials ---
+async function showCredentials(name) {
+  try {
+    const res = await fetch(`${API}/api/sandboxes`);
+    const sandboxes = await res.json();
+    const sb = (sandboxes || []).find(s => s.name === name);
+    if (!sb) { toast('Sandbox not found', 'error'); return; }
+
+    const ip = sb.podIP || '?';
+    const extIp = sb.exposed && sb.externalIP && sb.externalIP !== '(pending)' ? sb.externalIP : null;
+    const svcDns = sb.serviceName ? `${sb.serviceName}.sandbox.svc.cluster.local` : null;
+
+    let html = '<div style="font-size:12px;line-height:1.8">';
+
+    // Default credentials.
+    html += '<div style="margin-bottom:12px"><strong style="color:var(--green)">Default Credentials</strong></div>';
+    html += '<table style="width:100%;font-size:12px;margin-bottom:12px">';
+    html += `<tr><td style="color:var(--dim);padding:2px 8px 2px 0">User</td><td><code style="color:var(--green)">sandbox</code></td></tr>`;
+    html += `<tr><td style="color:var(--dim);padding:2px 8px 2px 0">Password</td><td><code style="color:var(--dim)">(none)</code></td></tr>`;
+    html += `<tr><td style="color:var(--dim);padding:2px 8px 2px 0">Service</td><td><code>sandbox</code></td></tr>`;
+    html += `<tr><td style="color:var(--dim);padding:2px 8px 2px 0">Port</td><td><code>3004</code></td></tr>`;
+    html += '</table>';
+
+    // Custom users (from provision config).
+    if (sb.config && sb.config.users && sb.config.users.length > 0) {
+      html += '<div style="margin-bottom:8px"><strong style="color:var(--amber)">Custom Users</strong></div>';
+      html += '<table style="width:100%;font-size:12px;margin-bottom:12px">';
+      html += '<tr><th style="text-align:left;color:var(--dim);font-size:10px">User</th><th style="text-align:left;color:var(--dim);font-size:10px">Password</th></tr>';
+      sb.config.users.forEach(u => {
+        html += `<tr><td><code style="color:var(--green)">${escHtml(u.name)}</code></td><td><code style="color:var(--amber)">${escHtml(u.password || '(none)')}</code></td></tr>`;
+      });
+      html += '</table>';
+    }
+
+    // Connection strings.
+    html += '<div style="margin-bottom:8px"><strong style="color:var(--blue)">Connection</strong></div>';
+
+    // Pod IP (always available).
+    const psqlPod = `curl http:// ${ip} -p 3004 -U sandbox -d sandbox`;
+    html += `<div class="conn-info" onclick="navigator.clipboard.writeText('${psqlPod}');toast('Copied!','success')" style="margin-bottom:6px" title="Click to copy">
+      <span style="color:var(--dim);font-size:10px">Pod IP:</span><br>${psqlPod}
+    </div>`;
+
+    // Service DNS (if exposed).
+    if (svcDns) {
+      const psqlSvc = `curl http:// ${svcDns} -p 3004 -U sandbox -d sandbox`;
+      html += `<div class="conn-info" onclick="navigator.clipboard.writeText('${psqlSvc}');toast('Copied!','success')" style="margin-bottom:6px" title="Click to copy">
+        <span style="color:var(--dim);font-size:10px">Service DNS:</span><br>${psqlSvc}
+      </div>`;
+    }
+
+    // External IP (if exposed and assigned).
+    if (extIp) {
+      const psqlExt = `curl http:// ${extIp} -p 3004 -U sandbox -d sandbox`;
+      html += `<div class="conn-info" onclick="navigator.clipboard.writeText('${psqlExt}');toast('Copied!','success')" style="background:rgba(59,130,246,.1);margin-bottom:6px" title="Click to copy">
+        <span style="color:var(--blue);font-size:10px">External IP:</span><br><span style="color:var(--blue)">${psqlExt}</span>
+      </div>`;
+    } else if (sb.exposed) {
+      html += '<div style="font-size:11px;color:var(--amber);margin-bottom:6px">⏳ External IP pending — LoadBalancer is provisioning...</div>';
+    }
+
+    html += '</div>';
+    openDetailModal(`🔑 Credentials: ${name}`, html);
+  } catch(e) { toast('Failed: '+e, 'error'); }
+}
+
+// --- Send Test Data ---
+async function sendTestData(name) {
+  try {
+    const res = await fetch(`${API}/api/sandboxes/${name}/test-data`, { method: 'POST' });
+    const d = await res.json();
+    if (!res.ok) { toast(d.error, 'error'); return; }
+    let html = `<pre>${escHtml(d.output || '(no output)')}</pre>`;
+    if (d.stderr) {
+      html += `<details style="margin-top:8px"><summary style="color:var(--amber);cursor:pointer;font-size:11px">stderr</summary><pre style="color:var(--amber)">${escHtml(d.stderr)}</pre></details>`;
+    }
+    openDetailModal(`Test Data: ${name}`, html);
+    toast('Test data sent!', 'success');
+  } catch(e) { toast('Failed: '+e, 'error'); }
+}
+
+// --- Detail Modal Helpers ---
+function openDetailModal(title, bodyHtml) {
+  const overlay = document.getElementById('detailModal');
+  overlay.querySelector('.modal-header h3').textContent = title;
+  overlay.querySelector('.modal-body').innerHTML = bodyHtml;
+  overlay.classList.add('active');
+}
+function closeDetailModal() {
+  document.getElementById('detailModal').classList.remove('active');
+}
+function escHtml(s) {
+  const el = document.createElement('span');
+  el.textContent = s;
+  return el.innerHTML;
+}
+
+// --- Refresh Loop (targeted, not full-page) ---
+function refresh() { fetchStatus(); fetchSandboxes(); fetchMetricsSummary(); }
+refresh(); // initial load
+setInterval(refresh, 5000); // every 5s, targeted updates only
+
+// Keyboard shortcuts.
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { closeProvision(); closeDetailModal(); }
+  if (e.key === '/' && !['INPUT','TEXTAREA'].includes(document.activeElement.tagName)) {
+    e.preventDefault(); document.getElementById('searchBox').focus();
+  }
+});
+document.getElementById('provisionModal').addEventListener('click', e => {
+  if (e.target.classList.contains('modal-overlay')) closeProvision();
+});
+document.getElementById('detailModal').addEventListener('click', e => {
+  if (e.target.classList.contains('modal-overlay')) closeDetailModal();
+});
+document.getElementById('sqlModal').addEventListener('click', e => {
+  if (e.target.classList.contains('modal-overlay')) closeSqlModal();
+});
+
+// --- SQL Console ---
+let currentSqlSandbox = '';
+
+function openSqlConsole(name, podIP, databases) {
+  currentSqlSandbox = name;
+  document.getElementById('sqlModalTitle').textContent = `SQL Console — ${name}`;
+
+  // Populate database dropdown.
+  const sel = document.getElementById('sqlDbSelect');
+  sel.innerHTML = '<option value="sandbox">sandbox</option>';
+  (databases || []).forEach(db => {
+    if (db !== 'postgres') {
+      sel.innerHTML += `<option value="${escHtml(db)}">${escHtml(db)}</option>`;
+    }
+  });
+
+  document.getElementById('sqlInput').value = '';
+  document.getElementById('sqlResult').textContent = 'Results will appear here...';
+  document.getElementById('sqlResult').className = 'sql-result empty';
+  document.getElementById('sqlModal').classList.add('active');
+
+  // Focus the input.
+  setTimeout(() => document.getElementById('sqlInput').focus(), 100);
+}
+
+function closeSqlModal() {
+  document.getElementById('sqlModal').classList.remove('active');
+  currentSqlSandbox = '';
+}
+
+// Quick SQL: populate input and auto-run.
+function quickSql(sql) {
+  document.getElementById('sqlInput').value = sql;
+  runQuery();
+}
+
+async function runQuery() {
+  const sql = document.getElementById('sqlInput').value.trim();
+  if (!sql) { toast('Enter a SQL query first', 'error'); return; }
+  const db = document.getElementById('sqlDbSelect').value;
+  const resultEl = document.getElementById('sqlResult');
+
+  resultEl.textContent = 'Executing...';
+  resultEl.className = 'sql-result empty';
+
+  try {
+    const res = await fetch(`${API}/api/sandboxes/${currentSqlSandbox}/query`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ sql, database: db }),
+    });
+    const d = await res.json();
+
+    if (d.error) {
+      resultEl.textContent = d.error;
+      resultEl.className = 'sql-result error';
+    } else {
+      resultEl.textContent = d.output || '(no output)';
+      resultEl.className = 'sql-result';
+    }
+    if (d.stderr && !d.error) {
+      resultEl.textContent += '\n\n--- NOTICE ---\n' + d.stderr;
+    }
+  } catch(e) {
+    resultEl.textContent = 'Request failed: ' + e;
+    resultEl.className = 'sql-result error';
+  }
+}
+
+// Ctrl+Enter to run query.
+document.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && currentSqlSandbox) {
+    e.preventDefault();
+    runQuery();
+  }
+});
+</script>
+
+<script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
+<script>
+// --- Web Terminal ---
+let activeTerm = null;
+let activeWs = null;
+
+function openTerminal(name) {
+  // Close any existing session.
+  closeTerminal();
+
+  document.getElementById('terminalTitle').textContent = `Terminal: ${name}`;
+  document.getElementById('terminalModal').classList.add('active');
+
+  const container = document.getElementById('terminalContainer');
+  container.innerHTML = '';
+
+  // Create xterm instance.
+  const term = new Terminal({
+    cursorBlink: true,
+    fontSize: 13,
+    fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Menlo', monospace",
+    theme: {
+      background: '#0d1117',
+      foreground: '#c9d1d9',
+      cursor: '#58a6ff',
+      selectionBackground: '#264f78',
+      black: '#0d1117',
+      red: '#ff7b72',
+      green: '#3fb950',
+      yellow: '#d29922',
+      blue: '#58a6ff',
+      magenta: '#bc8cff',
+      cyan: '#39d353',
+      white: '#c9d1d9',
+    },
+    scrollback: 5000,
+  });
+
+  const fitAddon = new FitAddon.FitAddon();
+  term.loadAddon(fitAddon);
+  term.open(container);
+
+  // Delay fit to allow modal to render.
+  setTimeout(() => {
+    fitAddon.fit();
+  }, 100);
+
+  // Build WebSocket URL using the current host (API is empty = same origin).
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsUrl = `${proto}//${location.host}/api/sandboxes/${name}/terminal`;
+
+  term.writeln('\x1b[33mConnecting to ' + name + '...\x1b[0m');
+
+  const ws = new WebSocket(wsUrl);
+  ws.binaryType = 'arraybuffer';
+
+  ws.onopen = () => {
+    term.writeln('\x1b[32mConnected!\x1b[0m\r\n');
+    // Send initial resize.
+    ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+  };
+
+  ws.onmessage = (event) => {
+    if (event.data instanceof ArrayBuffer) {
+      term.write(new Uint8Array(event.data));
+    } else {
+      term.write(event.data);
+    }
+  };
+
+  ws.onclose = (event) => {
+    term.writeln('\r\n\x1b[31mSession closed.\x1b[0m');
+  };
+
+  ws.onerror = (event) => {
+    term.writeln('\r\n\x1b[31mWebSocket error.\x1b[0m');
+  };
+
+  // Forward terminal input to WebSocket.
+  term.onData((data) => {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(data);
+    }
+  });
+
+  // Handle resize.
+  term.onResize(({ cols, rows }) => {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'resize', cols, rows }));
+    }
+  });
+
+  // Handle window resize.
+  const resizeHandler = () => fitAddon.fit();
+  window.addEventListener('resize', resizeHandler);
+
+  activeTerm = term;
+  activeWs = ws;
+  activeTerm._resizeHandler = resizeHandler;
+}
+
+function closeTerminal() {
+  if (activeWs) {
+    activeWs.close();
+    activeWs = null;
+  }
+  if (activeTerm) {
+    if (activeTerm._resizeHandler) {
+      window.removeEventListener('resize', activeTerm._resizeHandler);
+    }
+    activeTerm.dispose();
+    activeTerm = null;
+  }
+  document.getElementById('terminalModal').classList.remove('active');
+  document.getElementById('terminalContainer').innerHTML = '';
+}
+
+// Close terminal on Escape.
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && document.getElementById('terminalModal').classList.contains('active')) {
+    closeTerminal();
+  }
+});
+</script>
+
+</body>
+</html>

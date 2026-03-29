@@ -13,3 +13,16 @@
 
 # Gemini
 .gemini/
+
+# Docs
+docs/
+
+# Temp
+tmp/
+
+# Build artifacts
+app/controller/sandbox-controller
+app/sandbox/sandbox-sim
+
+# Test logs
+app/tests/logs/

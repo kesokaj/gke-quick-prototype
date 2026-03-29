@@ -11,7 +11,7 @@ Replaced Node Auto-Provisioning (NAP) and Custom Compute Class (CCC) with a manu
 - **`.env`** — Expanded with full secondary pool configuration: machine type, disk, image, autoscaling, surge, spot, gvnic, shielded, nested-virt, threads-per-core, auto-repair/upgrade, tags, labels, taints. Added default pool gvnic/shielded/auto-repair/upgrade settings.
 
 ### Added
-- **`k8s/secondary/node-system-config.yaml`** — Node system config (gcloud format) with kubelet `allowedUnsafeSysctls: [net.*]` and 20 sysctl tuning parameters
+- **`gke/secondary/node-system-config.yaml`** — Node system config (gcloud format) with kubelet `allowedUnsafeSysctls: [net.*]` and 20 sysctl tuning parameters
 
 ### Live Cluster Changes
 - Disabled NAP on `kata-gke`

@@ -1,0 +1,15 @@
+---
+# ServiceAccount for sandbox pods — Workload Identity enabled
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sandbox-sa
+  namespace: sandbox
+  annotations:
+    # Workload Identity: binds this KSA to the GCP service account.
+    # The GCP SA must exist and have the IAM binding:
+    #   gcloud iam service-accounts add-iam-policy-binding \
+    #     sandbox-sa@PROJECT_ID.iam.gserviceaccount.com \
+    #     --role roles/iam.workloadIdentityUser \
+    #     --member "serviceAccount:PROJECT_ID.svc.id.goog[sandbox/sandbox-sa]"
+    iam.gke.io/gcp-service-account: sandbox-sa@PROJECT_ID.iam.gserviceaccount.com

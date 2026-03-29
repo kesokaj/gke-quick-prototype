@@ -1,0 +1,21 @@
+# ClusterPodMonitoring for netd conntrack/socket metrics
+# Scrapes the netd DaemonSet on port 10231 (hostNetwork: true).
+# Metrics: conntrack_entries, conntrack_size, conntrack_error_count,
+#          num_inuse_sockets, num_tw_sockets, socket_memory,
+#          tcp_segments_*, tcp_*_rehash_count
+apiVersion: monitoring.googleapis.com/v1
+kind: ClusterPodMonitoring
+metadata:
+  name: netd-conntrack
+spec:
+  selector:
+    matchLabels:
+      k8s-app: netd
+  endpoints:
+    - port: 10231
+      interval: 10s
+  targetLabels:
+    metadata:
+      - pod
+      - node
+      - container

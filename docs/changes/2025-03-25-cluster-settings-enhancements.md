@@ -35,4 +35,4 @@ Updated `cluster.sh` and applied live cluster settings for dev environment.
 ## Modified Files
 - `cluster.sh` — SA creation, workload identity, NAP config, Cloud NAT tuning, Filestore CSI, static default pool
 - `.env` — NUM_NODES=1, SECONDARY_MACHINE_TYPE added, ENABLE_CLOUD_NAT toggle
-- `k8s/secondary/compute-class.yaml` — templated SECONDARY_MACHINE_TYPE via envsubst
+- `gke/secondary/compute-class.yaml` — templated SECONDARY_MACHINE_TYPE via envsubst

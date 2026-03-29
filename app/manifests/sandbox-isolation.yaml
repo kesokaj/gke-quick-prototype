@@ -1,0 +1,50 @@
+# =============================================================================
+# Sandbox Network Isolation
+# =============================================================================
+#
+# Egress:  sandbox pods can ONLY reach the public internet.
+#          All RFC1918, link-local, loopback, and CGNAT blocked.
+#          No in-cluster traffic whatsoever.
+#          Pods use dnsPolicy: None with public nameservers
+#          (8.8.8.8 / 1.1.1.1), so kube-dns access is not needed.
+#
+# Ingress: only the sandbox-control namespace (controller)
+#          can reach sandbox pods on port 3004.
+#
+# =============================================================================
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sandbox-isolation
+  namespace: sandbox
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8       # RFC1918 (nodes, pods, services)
+              - 172.16.0.0/12    # RFC1918
+              - 192.168.0.0/16   # RFC1918
+              - 127.0.0.0/8      # Loopback
+              - 169.254.0.0/16   # Link-local (metadata server)
+              - 100.64.0.0/10    # CGNAT / GKE alias ranges
+        - ipBlock:
+            cidr: ::/0
+            except:
+              - fc00::/7         # Unique local (RFC4193)
+              - ::1/128          # Loopback
+              - fe80::/10        # Link-local
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: sandbox-control
+      ports:
+        - port: 3004
+          protocol: TCP
