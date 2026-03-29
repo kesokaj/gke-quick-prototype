@@ -1,59 +1,51 @@
 # =============================================================================
-# Conntrack Reporter — pushes netd metrics to Cloud Monitoring
+# gVisor Metrics Reporter — pushes runsc-metric-server data to Cloud Monitoring
 # =============================================================================
 #
-# netd serves conntrack/socket metrics on localhost:10231 but only binds
-# to loopback (not scrapable by GMP externally).
+# runsc-metric-server serves per-sandbox Prometheus metrics on localhost:9115
+# but only binds to loopback (not scrapable by GMP externally).
 #
 # This DaemonSet runs a prometheus-to-sd sidecar with hostNetwork: true,
-# so localhost resolves to the same host where netd is listening.
-# It reads metrics from netd and pushes them to Cloud Monitoring as
+# so localhost resolves to the same host where runsc-metric-server is listening.
+# It reads metrics and pushes them to Cloud Monitoring as
 # custom.googleapis.com/gke/* metrics.
 #
-# Runs in gmp-public namespace to avoid kube-system Warden restrictions.
-# Uses Workload Identity via the conntrack-reporter KSA bound to the
-# gke-default GSA (roles/owner).
+# Only runs on gVisor-enabled nodes (nodeSelector).
 #
 # Exported metrics:
-#   custom.googleapis.com/gke/node/conntrack_entries
-#   custom.googleapis.com/gke/node/conntrack_error_count
-#   custom.googleapis.com/gke/node/num_inuse_sockets
-#   custom.googleapis.com/gke/node/num_tw_sockets
-#   custom.googleapis.com/gke/node/socket_memory
+#   custom.googleapis.com/gke/node/meta_sandbox_running
+#   custom.googleapis.com/gke/node/fs_opens
+#   custom.googleapis.com/gke/node/fs_reads
+#   custom.googleapis.com/gke/node/netstack_tcp_current_established
+#   custom.googleapis.com/gke/node/netstack_nic_rx_bytes
+#   custom.googleapis.com/gke/node/netstack_nic_tx_bytes
+#   custom.googleapis.com/gke/node/netstack_dropped_packets
 # =============================================================================
 
----
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: conntrack-reporter
-  namespace: gmp-public
-  annotations:
-    iam.gke.io/gcp-service-account: gke-default@lvble-repro-sandbox1.iam.gserviceaccount.com
-
----
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
-  name: conntrack-reporter
+  name: gvisor-metrics-reporter
   namespace: gmp-public
 spec:
   selector:
     matchLabels:
-      k8s-app: conntrack-reporter
+      k8s-app: gvisor-metrics-reporter
   template:
     metadata:
       labels:
-        k8s-app: conntrack-reporter
+        k8s-app: gvisor-metrics-reporter
     spec:
       serviceAccountName: conntrack-reporter
+      nodeSelector:
+        sandbox.gke.io/runtime: gvisor
       containers:
         - name: prometheus-to-sd
           image: gcr.io/google-containers/prometheus-to-sd:v0.9.2
           imagePullPolicy: IfNotPresent
           command:
             - /monitor
-            - --source=node:http://localhost:10231?whitelisted=conntrack_entries,conntrack_error_count,num_inuse_sockets,num_tw_sockets,socket_memory
+            - --source=node:http://localhost:9115?whitelisted=meta_sandbox_running,fs_opens,fs_reads,netstack_tcp_current_established,netstack_nic_rx_bytes,netstack_nic_tx_bytes,netstack_dropped_packets,netstack_ip_packets_received,netstack_ip_packets_sent
             - --stackdriver-prefix=custom.googleapis.com/gke
             - --api-override=https://monitoring.googleapis.com
             - --export-interval=120s

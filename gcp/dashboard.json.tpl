@@ -1046,7 +1046,7 @@
                                           {
                                                 "timeSeriesQuery": {
                                                       "timeSeriesFilter": {
-                                                            "filter": "metric.type=\"kubernetes.io/node/cpu/allocatable_utilization\" resource.type=\"k8s_node\"",
+                                                            "filter": "metric.type=\"kubernetes.io/node/cpu/allocatable_utilization\" resource.type=\"gke_container\"",
                                                             "aggregation": {
                                                                   "alignmentPeriod": "60s",
                                                                   "perSeriesAligner": "ALIGN_MEAN",
@@ -1083,7 +1083,7 @@
                                           {
                                                 "timeSeriesQuery": {
                                                       "timeSeriesFilter": {
-                                                            "filter": "metric.type=\"kubernetes.io/node/memory/allocatable_utilization\" resource.type=\"k8s_node\"",
+                                                            "filter": "metric.type=\"kubernetes.io/node/memory/allocatable_utilization\" resource.type=\"gke_container\"",
                                                             "aggregation": {
                                                                   "alignmentPeriod": "60s",
                                                                   "perSeriesAligner": "ALIGN_MEAN",
@@ -1120,7 +1120,7 @@
                                           {
                                                 "timeSeriesQuery": {
                                                       "timeSeriesFilter": {
-                                                            "filter": "metric.type=\"kubernetes.io/node/ephemeral_storage/used_bytes\" resource.type=\"k8s_node\"",
+                                                            "filter": "metric.type=\"kubernetes.io/node/ephemeral_storage/used_bytes\" resource.type=\"gke_container\"",
                                                             "aggregation": {
                                                                   "alignmentPeriod": "60s",
                                                                   "perSeriesAligner": "ALIGN_MEAN",
@@ -1908,7 +1908,7 @@
                                           {
                                                 "timeSeriesQuery": {
                                                       "timeSeriesFilter": {
-                                                            "filter": "metric.type=\"custom.googleapis.com/gke/conntrack_entries\" resource.type=\"k8s_node\"",
+                                                            "filter": "metric.type=\"custom.googleapis.com/gke/node/conntrack_entries\" resource.type=\"gke_container\"",
                                                             "aggregation": {
                                                                   "alignmentPeriod": "120s",
                                                                   "perSeriesAligner": "ALIGN_MEAN",
@@ -1942,7 +1942,7 @@
                                           {
                                                 "timeSeriesQuery": {
                                                       "timeSeriesFilter": {
-                                                            "filter": "metric.type=\"custom.googleapis.com/gke/conntrack_error_count\" resource.type=\"k8s_node\"",
+                                                            "filter": "metric.type=\"custom.googleapis.com/gke/node/conntrack_error_count\" resource.type=\"gke_container\"",
                                                             "aggregation": {
                                                                   "alignmentPeriod": "120s",
                                                                   "perSeriesAligner": "ALIGN_RATE",
@@ -1976,7 +1976,7 @@
                                           {
                                                 "timeSeriesQuery": {
                                                       "timeSeriesFilter": {
-                                                            "filter": "metric.type=\"custom.googleapis.com/gke/num_inuse_sockets\" resource.type=\"k8s_node\"",
+                                                            "filter": "metric.type=\"custom.googleapis.com/gke/node/num_inuse_sockets\" resource.type=\"gke_container\"",
                                                             "aggregation": {
                                                                   "alignmentPeriod": "120s",
                                                                   "perSeriesAligner": "ALIGN_MEAN",
@@ -1991,7 +1991,7 @@
                                           {
                                                 "timeSeriesQuery": {
                                                       "timeSeriesFilter": {
-                                                            "filter": "metric.type=\"custom.googleapis.com/gke/num_tw_sockets\" resource.type=\"k8s_node\"",
+                                                            "filter": "metric.type=\"custom.googleapis.com/gke/node/num_tw_sockets\" resource.type=\"gke_container\"",
                                                             "aggregation": {
                                                                   "alignmentPeriod": "120s",
                                                                   "perSeriesAligner": "ALIGN_MEAN",
@@ -2026,7 +2026,7 @@
                                           {
                                                 "timeSeriesQuery": {
                                                       "timeSeriesFilter": {
-                                                            "filter": "metric.type=\"custom.googleapis.com/gke/socket_memory\" resource.type=\"k8s_node\"",
+                                                            "filter": "metric.type=\"custom.googleapis.com/gke/node/socket_memory\" resource.type=\"gke_container\"",
                                                             "aggregation": {
                                                                   "alignmentPeriod": "120s",
                                                                   "perSeriesAligner": "ALIGN_MEAN",
@@ -2040,6 +2040,206 @@
                                     ],
                                     "yAxis": {
                                           "label": "Bytes",
+                                          "scale": "LINEAR"
+                                    },
+                                    "chartOptions": {
+                                          "mode": "COLOR"
+                                    }
+                              }
+                        }
+                  },
+                  {
+                        "yPos": 368,
+                        "xPos": 0,
+                        "width": 48,
+                        "height": 4,
+                        "widget": {
+                              "title": "",
+                              "text": {
+                                    "content": "# 🛡️ gVisor Sandbox Runtime (per Pod)",
+                                    "format": "MARKDOWN",
+                                    "style": {}
+                              }
+                        }
+                  },
+                  {
+                        "yPos": 372,
+                        "xPos": 0,
+                        "width": 16,
+                        "height": 16,
+                        "widget": {
+                              "title": "Running Sandboxes (per Node)",
+                              "xyChart": {
+                                    "dataSets": [
+                                          {
+                                                "timeSeriesQuery": {
+                                                      "timeSeriesFilter": {
+                                                            "filter": "metric.type=\"custom.googleapis.com/gke/node/meta_sandbox_running\" resource.type=\"gke_container\"",
+                                                            "aggregation": {
+                                                                  "alignmentPeriod": "120s",
+                                                                  "perSeriesAligner": "ALIGN_MEAN",
+                                                                  "crossSeriesReducer": "REDUCE_NONE"
+                                                            }
+                                                      }
+                                                },
+                                                "plotType": "LINE",
+                                                "minAlignmentPeriod": "120s"
+                                          }
+                                    ],
+                                    "yAxis": {
+                                          "label": "Sandboxes",
+                                          "scale": "LINEAR"
+                                    },
+                                    "chartOptions": {
+                                          "mode": "COLOR"
+                                    }
+                              }
+                        }
+                  },
+                  {
+                        "yPos": 372,
+                        "xPos": 16,
+                        "width": 16,
+                        "height": 16,
+                        "widget": {
+                              "title": "File Opens (per Node)",
+                              "xyChart": {
+                                    "dataSets": [
+                                          {
+                                                "timeSeriesQuery": {
+                                                      "timeSeriesFilter": {
+                                                            "filter": "metric.type=\"custom.googleapis.com/gke/node/fs_opens\" resource.type=\"gke_container\"",
+                                                            "aggregation": {
+                                                                  "alignmentPeriod": "120s",
+                                                                  "perSeriesAligner": "ALIGN_RATE",
+                                                                  "crossSeriesReducer": "REDUCE_NONE"
+                                                            }
+                                                      }
+                                                },
+                                                "plotType": "LINE",
+                                                "minAlignmentPeriod": "120s"
+                                          }
+                                    ],
+                                    "yAxis": {
+                                          "label": "Opens/s",
+                                          "scale": "LINEAR"
+                                    },
+                                    "chartOptions": {
+                                          "mode": "COLOR"
+                                    }
+                              }
+                        }
+                  },
+                  {
+                        "yPos": 372,
+                        "xPos": 32,
+                        "width": 16,
+                        "height": 16,
+                        "widget": {
+                              "title": "TCP Established Connections",
+                              "xyChart": {
+                                    "dataSets": [
+                                          {
+                                                "timeSeriesQuery": {
+                                                      "timeSeriesFilter": {
+                                                            "filter": "metric.type=\"custom.googleapis.com/gke/node/netstack_tcp_current_established\" resource.type=\"gke_container\"",
+                                                            "aggregation": {
+                                                                  "alignmentPeriod": "120s",
+                                                                  "perSeriesAligner": "ALIGN_MEAN",
+                                                                  "crossSeriesReducer": "REDUCE_NONE"
+                                                            }
+                                                      }
+                                                },
+                                                "plotType": "LINE",
+                                                "minAlignmentPeriod": "120s"
+                                          }
+                                    ],
+                                    "yAxis": {
+                                          "label": "Connections",
+                                          "scale": "LINEAR"
+                                    },
+                                    "chartOptions": {
+                                          "mode": "COLOR"
+                                    }
+                              }
+                        }
+                  },
+                  {
+                        "yPos": 388,
+                        "xPos": 0,
+                        "width": 24,
+                        "height": 16,
+                        "widget": {
+                              "title": "Network I/O (RX/TX Bytes)",
+                              "xyChart": {
+                                    "dataSets": [
+                                          {
+                                                "timeSeriesQuery": {
+                                                      "timeSeriesFilter": {
+                                                            "filter": "metric.type=\"custom.googleapis.com/gke/node/netstack_nic_rx_bytes\" resource.type=\"gke_container\"",
+                                                            "aggregation": {
+                                                                  "alignmentPeriod": "120s",
+                                                                  "perSeriesAligner": "ALIGN_RATE",
+                                                                  "crossSeriesReducer": "REDUCE_SUM"
+                                                            }
+                                                      }
+                                                },
+                                                "plotType": "LINE",
+                                                "minAlignmentPeriod": "120s",
+                                                "legendTemplate": "RX"
+                                          },
+                                          {
+                                                "timeSeriesQuery": {
+                                                      "timeSeriesFilter": {
+                                                            "filter": "metric.type=\"custom.googleapis.com/gke/node/netstack_nic_tx_bytes\" resource.type=\"gke_container\"",
+                                                            "aggregation": {
+                                                                  "alignmentPeriod": "120s",
+                                                                  "perSeriesAligner": "ALIGN_RATE",
+                                                                  "crossSeriesReducer": "REDUCE_SUM"
+                                                            }
+                                                      }
+                                                },
+                                                "plotType": "LINE",
+                                                "minAlignmentPeriod": "120s",
+                                                "legendTemplate": "TX"
+                                          }
+                                    ],
+                                    "yAxis": {
+                                          "label": "Bytes/s",
+                                          "scale": "LINEAR"
+                                    },
+                                    "chartOptions": {
+                                          "mode": "COLOR"
+                                    }
+                              }
+                        }
+                  },
+                  {
+                        "yPos": 388,
+                        "xPos": 24,
+                        "width": 24,
+                        "height": 16,
+                        "widget": {
+                              "title": "Dropped Packets",
+                              "xyChart": {
+                                    "dataSets": [
+                                          {
+                                                "timeSeriesQuery": {
+                                                      "timeSeriesFilter": {
+                                                            "filter": "metric.type=\"custom.googleapis.com/gke/node/netstack_dropped_packets\" resource.type=\"gke_container\"",
+                                                            "aggregation": {
+                                                                  "alignmentPeriod": "120s",
+                                                                  "perSeriesAligner": "ALIGN_RATE",
+                                                                  "crossSeriesReducer": "REDUCE_NONE"
+                                                            }
+                                                      }
+                                                },
+                                                "plotType": "LINE",
+                                                "minAlignmentPeriod": "120s"
+                                          }
+                                    ],
+                                    "yAxis": {
+                                          "label": "Packets/s",
                                           "scale": "LINEAR"
                                     },
                                     "chartOptions": {

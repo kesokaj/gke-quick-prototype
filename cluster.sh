@@ -570,14 +570,52 @@ apply_shared() {
         fi
     fi
 
-    # Cilium pod monitoring
-    if [[ -f "${shared_dir}/cilium-pod-monitoring.yaml" ]]; then
-        log "Applying Cilium pod monitoring..."
+    # Monitoring resources (ClusterPodMonitoring, PodMonitoring, ClusterNodeMonitoring)
+    local monitoring_files=(
+        "cilium-pod-monitoring.yaml"
+        "controller-pod-monitoring.yaml"
+        "kubelet-extra-monitoring.yaml"
+        "runsc-pod-monitoring.yaml"
+    )
+    for mf in "${monitoring_files[@]}"; do
+        if [[ -f "${shared_dir}/${mf}" ]]; then
+            log "Applying ${mf}..."
+            if [[ "${dry_run}" == "--dry-run" ]]; then
+                warn "DRY RUN — would kubectl apply ${mf}"
+            else
+                kubectl apply -f "${shared_dir}/${mf}"
+                ok "${mf} applied"
+            fi
+        fi
+    done
+
+    # Conntrack reporter DaemonSet (prometheus-to-sd → Cloud Monitoring)
+    # Requires Workload Identity binding for the conntrack-reporter KSA
+    if [[ -f "${shared_dir}/netd-conntrack-monitoring.yaml" ]]; then
+        log "Applying conntrack reporter..."
         if [[ "${dry_run}" == "--dry-run" ]]; then
-            warn "DRY RUN — would kubectl apply cilium-pod-monitoring"
+            warn "DRY RUN — would create WI binding and apply conntrack reporter"
         else
-            kubectl apply -f "${shared_dir}/cilium-pod-monitoring.yaml"
-            ok "Cilium pod monitoring applied"
+            # Ensure WI binding exists (idempotent)
+            gcloud iam service-accounts add-iam-policy-binding \
+                "gke-default@${PROJECT}.iam.gserviceaccount.com" \
+                --role=roles/iam.workloadIdentityUser \
+                --member="serviceAccount:${PROJECT}.svc.id.goog[gmp-public/conntrack-reporter]" \
+                --project="${PROJECT}" --quiet 2>/dev/null || true
+            kubectl apply -f "${shared_dir}/netd-conntrack-monitoring.yaml"
+            ok "Conntrack reporter applied"
+        fi
+    fi
+
+    # gVisor metrics reporter DaemonSet (prometheus-to-sd → Cloud Monitoring)
+    # Reuses the conntrack-reporter KSA (same WI binding)
+    if [[ -f "${shared_dir}/runsc-pod-monitoring.yaml" ]]; then
+        log "Applying gVisor metrics reporter..."
+        if [[ "${dry_run}" == "--dry-run" ]]; then
+            warn "DRY RUN — would kubectl apply runsc-pod-monitoring"
+        else
+            kubectl apply -f "${shared_dir}/runsc-pod-monitoring.yaml"
+            ok "gVisor metrics reporter applied"
         fi
     fi
 }
