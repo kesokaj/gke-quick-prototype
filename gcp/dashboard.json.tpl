@@ -1902,19 +1902,26 @@
                         "width": 16,
                         "height": 16,
                         "widget": {
-                              "title": "Conntrack Table Utilization (%)",
+                              "title": "Conntrack Entries (per Node)",
                               "xyChart": {
                                     "dataSets": [
                                           {
                                                 "timeSeriesQuery": {
-                                                      "prometheusQuery": "(conntrack_entries{cluster=\"__CLUSTER_NAME__\"} / conntrack_size{cluster=\"__CLUSTER_NAME__\"}) * 100"
+                                                      "timeSeriesFilter": {
+                                                            "filter": "metric.type=\"custom.googleapis.com/gke/conntrack_entries\" resource.type=\"k8s_node\"",
+                                                            "aggregation": {
+                                                                  "alignmentPeriod": "120s",
+                                                                  "perSeriesAligner": "ALIGN_MEAN",
+                                                                  "crossSeriesReducer": "REDUCE_NONE"
+                                                            }
+                                                      }
                                                 },
                                                 "plotType": "LINE",
-                                                "legendTemplate": "{{node}}"
+                                                "minAlignmentPeriod": "120s"
                                           }
                                     ],
                                     "yAxis": {
-                                          "label": "% Used",
+                                          "label": "Entries",
                                           "scale": "LINEAR"
                                     },
                                     "chartOptions": {
@@ -1929,15 +1936,22 @@
                         "width": 16,
                         "height": 16,
                         "widget": {
-                              "title": "Conntrack Errors (rate/min)",
+                              "title": "Conntrack Errors (per Node)",
                               "xyChart": {
                                     "dataSets": [
                                           {
                                                 "timeSeriesQuery": {
-                                                      "prometheusQuery": "sum by (type) (rate(conntrack_error_count{cluster=\"__CLUSTER_NAME__\"}[5m]))"
+                                                      "timeSeriesFilter": {
+                                                            "filter": "metric.type=\"custom.googleapis.com/gke/conntrack_error_count\" resource.type=\"k8s_node\"",
+                                                            "aggregation": {
+                                                                  "alignmentPeriod": "120s",
+                                                                  "perSeriesAligner": "ALIGN_RATE",
+                                                                  "crossSeriesReducer": "REDUCE_NONE"
+                                                            }
+                                                      }
                                                 },
                                                 "plotType": "LINE",
-                                                "legendTemplate": "{{type}}"
+                                                "minAlignmentPeriod": "120s"
                                           }
                                     ],
                                     "yAxis": {
@@ -1961,17 +1975,33 @@
                                     "dataSets": [
                                           {
                                                 "timeSeriesQuery": {
-                                                      "prometheusQuery": "sum by (node) (num_inuse_sockets{cluster=\"__CLUSTER_NAME__\", protocol=\"tcp\"})"
+                                                      "timeSeriesFilter": {
+                                                            "filter": "metric.type=\"custom.googleapis.com/gke/num_inuse_sockets\" resource.type=\"k8s_node\"",
+                                                            "aggregation": {
+                                                                  "alignmentPeriod": "120s",
+                                                                  "perSeriesAligner": "ALIGN_MEAN",
+                                                                  "crossSeriesReducer": "REDUCE_NONE"
+                                                            }
+                                                      }
                                                 },
                                                 "plotType": "LINE",
-                                                "legendTemplate": "inuse {{node}}"
+                                                "minAlignmentPeriod": "120s",
+                                                "legendTemplate": "inuse"
                                           },
                                           {
                                                 "timeSeriesQuery": {
-                                                      "prometheusQuery": "sum by (node) (num_tw_sockets{cluster=\"__CLUSTER_NAME__\"})"
+                                                      "timeSeriesFilter": {
+                                                            "filter": "metric.type=\"custom.googleapis.com/gke/num_tw_sockets\" resource.type=\"k8s_node\"",
+                                                            "aggregation": {
+                                                                  "alignmentPeriod": "120s",
+                                                                  "perSeriesAligner": "ALIGN_MEAN",
+                                                                  "crossSeriesReducer": "REDUCE_NONE"
+                                                            }
+                                                      }
                                                 },
                                                 "plotType": "LINE",
-                                                "legendTemplate": "time_wait {{node}}"
+                                                "minAlignmentPeriod": "120s",
+                                                "legendTemplate": "time_wait"
                                           }
                                     ],
                                     "yAxis": {
@@ -1987,56 +2017,29 @@
                   {
                         "yPos": 348,
                         "xPos": 0,
-                        "width": 24,
+                        "width": 48,
                         "height": 16,
                         "widget": {
-                              "title": "Socket Memory (bytes)",
+                              "title": "Socket Memory (per Node)",
                               "xyChart": {
                                     "dataSets": [
                                           {
                                                 "timeSeriesQuery": {
-                                                      "prometheusQuery": "sum by (node) (socket_memory{cluster=\"__CLUSTER_NAME__\"})"
+                                                      "timeSeriesFilter": {
+                                                            "filter": "metric.type=\"custom.googleapis.com/gke/socket_memory\" resource.type=\"k8s_node\"",
+                                                            "aggregation": {
+                                                                  "alignmentPeriod": "120s",
+                                                                  "perSeriesAligner": "ALIGN_MEAN",
+                                                                  "crossSeriesReducer": "REDUCE_NONE"
+                                                            }
+                                                      }
                                                 },
                                                 "plotType": "LINE",
-                                                "legendTemplate": "{{node}}"
+                                                "minAlignmentPeriod": "120s"
                                           }
                                     ],
                                     "yAxis": {
                                           "label": "Bytes",
-                                          "scale": "LINEAR"
-                                    },
-                                    "chartOptions": {
-                                          "mode": "COLOR"
-                                    }
-                              }
-                        }
-                  },
-                  {
-                        "yPos": 348,
-                        "xPos": 24,
-                        "width": 24,
-                        "height": 16,
-                        "widget": {
-                              "title": "TCP Retransmission Rate",
-                              "xyChart": {
-                                    "dataSets": [
-                                          {
-                                                "timeSeriesQuery": {
-                                                      "prometheusQuery": "sum by (node) (rate(tcp_segments_retransmitted_count{cluster=\"__CLUSTER_NAME__\"}[5m]))"
-                                                },
-                                                "plotType": "LINE",
-                                                "legendTemplate": "retransmit {{node}}"
-                                          },
-                                          {
-                                                "timeSeriesQuery": {
-                                                      "prometheusQuery": "sum by (node) (rate(tcp_segments_sent_count{cluster=\"__CLUSTER_NAME__\"}[5m]))"
-                                                },
-                                                "plotType": "LINE",
-                                                "legendTemplate": "sent {{node}}"
-                                          }
-                                    ],
-                                    "yAxis": {
-                                          "label": "Segments/s",
                                           "scale": "LINEAR"
                                     },
                                     "chartOptions": {

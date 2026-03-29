@@ -1,21 +1,62 @@
-# ClusterPodMonitoring for netd conntrack/socket metrics
-# Scrapes the netd DaemonSet on port 10231 (hostNetwork: true).
-# Metrics: conntrack_entries, conntrack_size, conntrack_error_count,
-#          num_inuse_sockets, num_tw_sockets, socket_memory,
-#          tcp_segments_*, tcp_*_rehash_count
-apiVersion: monitoring.googleapis.com/v1
-kind: ClusterPodMonitoring
+# =============================================================================
+# Conntrack Reporter — pushes netd metrics to Cloud Monitoring
+# =============================================================================
+#
+# netd already serves conntrack/socket metrics on localhost:10231, but it
+# only binds to loopback (not scrapable by GMP externally).
+#
+# This DaemonSet runs a prometheus-to-sd sidecar with hostNetwork: true,
+# so localhost resolves to the same host where netd is listening.
+# It reads metrics from netd and pushes them to Cloud Monitoring as
+# custom.googleapis.com/gke/* metrics.
+#
+# Exported metrics:
+#   custom.googleapis.com/gke/conntrack_entries
+#   custom.googleapis.com/gke/conntrack_error_count
+#   custom.googleapis.com/gke/num_inuse_sockets
+#   custom.googleapis.com/gke/num_tw_sockets
+#   custom.googleapis.com/gke/socket_memory
+# =============================================================================
+
+apiVersion: apps/v1
+kind: DaemonSet
 metadata:
-  name: netd-conntrack
+  name: conntrack-reporter
+  namespace: kube-system
 spec:
   selector:
     matchLabels:
-      k8s-app: netd
-  endpoints:
-    - port: 10231
-      interval: 10s
-  targetLabels:
+      k8s-app: conntrack-reporter
+  template:
     metadata:
-      - pod
-      - node
-      - container
+      labels:
+        k8s-app: conntrack-reporter
+    spec:
+      containers:
+        - name: prometheus-to-sd
+          image: k8s.gcr.io/prometheus-to-sd:v0.8.2
+          imagePullPolicy: IfNotPresent
+          command:
+            - /monitor
+            - --source=node:http://localhost:10231?whitelisted=conntrack_entries,conntrack_error_count,num_inuse_sockets,num_tw_sockets,socket_memory
+            - --stackdriver-prefix=custom.googleapis.com/gke
+            - --monitored-resource-type-prefix=k8s_
+            - --api-override=https://monitoring.googleapis.com
+            - --export-interval=120s
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
+      dnsPolicy: ClusterFirst
+      hostNetwork: true
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 0
+      tolerations:
+        - effect: NoExecute
+          operator: Exists
+        - effect: NoSchedule
+          operator: Exists
+        - key: components.gke.io/gke-managed-components
+          operator: Exists
