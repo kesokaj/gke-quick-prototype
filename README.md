@@ -88,7 +88,8 @@ Applied automatically during `./cluster.sh create`:
 |---|---|
 | `gke/shared/cilium-config-override.yaml` | DPv2 scale-optimized tuning (monitor aggregation, eBPF map sizes, rate limits) |
 | `gke/shared/cilium-pod-monitoring.yaml` | GMP `ClusterPodMonitoring` for anetd (port 9990, 10s) |
-| `gke/shared/netd-conntrack-monitoring.yaml` | GMP `ClusterPodMonitoring` for conntrack/socket metrics (port 10231, 10s) |
+| `gke/shared/netd-conntrack-monitoring.yaml` | `prometheus-to-sd` DaemonSet pushing conntrack/socket metrics to Cloud Monitoring (all nodes) |
+| `gke/shared/runsc-pod-monitoring.yaml` | `prometheus-to-sd` DaemonSet pushing gVisor runtime metrics to Cloud Monitoring (gVisor nodes only) |
 | `gke/shared/controller-pod-monitoring.yaml` | GMP `PodMonitoring` for sandbox-controller (port 8080, 10s) |
 | `gke/shared/kubelet-extra-monitoring.yaml` | GMP `ClusterNodeMonitoring` for kubelet metrics (10s) |
 
@@ -119,7 +120,8 @@ Use `--dry-run` to preview gcloud commands without executing them.
 │   ├── shared/                         # Applied during cluster create
 │   │   ├── cilium-config-override.yaml
 │   │   ├── cilium-pod-monitoring.yaml
-│   │   ├── netd-conntrack-monitoring.yaml
+│   │   ├── netd-conntrack-monitoring.yaml   # prometheus-to-sd → Cloud Monitoring (conntrack)
+│   │   ├── runsc-pod-monitoring.yaml         # prometheus-to-sd → Cloud Monitoring (gVisor)
 │   │   ├── controller-pod-monitoring.yaml
 │   │   └── kubelet-extra-monitoring.yaml
 │   ├── manual/                         # Manual-apply configs (not auto-deployed)
