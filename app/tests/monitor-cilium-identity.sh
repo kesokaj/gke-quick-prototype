@@ -8,6 +8,8 @@
 #   2. CiliumIdentity count over time
 #   3. CiliumEndpoint identity changes and regeneration events
 #
+# Dependencies: kubectl, jq
+#
 # Usage:
 #   ./monitor-cilium-identity.sh              # Run all monitors
 #   ./monitor-cilium-identity.sh identities   # Just watch identity count
@@ -36,6 +38,11 @@ ok()   { log "${GREEN}✔${RESET} $*"; }
 err()  { log "${RED}✘${RESET} $*"; }
 
 # ---------------------------------------------------------------------------
+# Preflight: verify jq is available
+# ---------------------------------------------------------------------------
+command -v jq >/dev/null 2>&1 || { echo "ERROR: jq is required but not found. Install with: brew install jq" >&2; exit 1; }
+
+# ---------------------------------------------------------------------------
 # Snapshot: one-time view of current state
 # ---------------------------------------------------------------------------
 snapshot() {
@@ -51,16 +58,13 @@ snapshot() {
     # Sandbox-specific identities.
     echo ""
     echo -e "${BOLD}Sandbox identities:${RESET}"
-    kubectl get ciliumidentity -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.security-labels}{"\n"}{end}' 2>/dev/null \
-        | grep -E 'warmpool|is-sandbox' \
-        | while IFS=$'\t' read -r id labels; do
-            # Extract warmpool value.
-            local wp
-            wp=$(echo "${labels}" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('k8s:warmpool','?'))" 2>/dev/null || echo "?")
+    kubectl get ciliumidentity -o json 2>/dev/null \
+        | jq -r '.items[] | select(.["security-labels"] | to_entries | any(.key | test("warmpool|is-sandbox"))) | "\(.metadata.name)\t\(.["security-labels"]["k8s:warmpool"] // "?")"' \
+        | while IFS=$'\t' read -r id wp; do
             if [[ "${wp}" == "true" ]]; then
                 echo -e "  ${GREEN}●${RESET} Identity ${BOLD}${id}${RESET} → warmpool=${GREEN}true${RESET}  (idle pool)"
             else
-                echo -e "  ${YELLOW}●${RESET} Identity ${BOLD}${id}${RESET} → warmpool=${YELLOW}false${RESET} (claimed)"
+                echo -e "  ${YELLOW}●${RESET} Identity ${BOLD}${id}${RESET} → warmpool=${YELLOW}${wp}${RESET} (claimed)"
             fi
         done
 
@@ -104,35 +108,28 @@ watch_labels() {
     info "Press Ctrl+C to stop."
     echo ""
 
+    # jq natively handles the concatenated multi-line JSON stream from kubectl -w.
+    # --unbuffered ensures output is flushed immediately per event.
+    # -c produces compact one-line JSON per event for easy bash parsing.
+    declare -A seen
+
     kubectl get pods -n "${NAMESPACE}" -l managed-by=warmpool -w -o json 2>/dev/null \
-        | python3 -u -c "
-import json, sys, datetime
+        | jq --unbuffered -c '{name: .metadata.name, wp: (.metadata.labels.warmpool // "?")}' 2>/dev/null \
+        | while IFS= read -r line; do
+            local name wp ts
+            name=$(echo "${line}" | jq -r '.name')
+            wp=$(echo "${line}" | jq -r '.wp')
+            ts=$(date '+%H:%M:%S')
 
-seen = {}  # pod_name -> last_warmpool_value
+            local prev="${seen[${name}]:-}"
+            seen["${name}"]="${wp}"
 
-for line in sys.stdin:
-    line = line.strip()
-    if not line:
-        continue
-    try:
-        obj = json.loads(line)
-    except json.JSONDecodeError:
-        continue
-
-    name = obj.get('metadata', {}).get('name', '?')
-    labels = obj.get('metadata', {}).get('labels', {})
-    wp = labels.get('warmpool', '?')
-    ts = datetime.datetime.now().strftime('%H:%M:%S')
-
-    prev = seen.get(name)
-    seen[name] = wp
-
-    if prev is not None and prev != wp:
-        # Identity-changing label transition detected!
-        print(f'\033[1;33m⚡ {ts}\033[0m {name}: warmpool={prev} → \033[1m{wp}\033[0m  ← IDENTITY CHANGE', flush=True)
-    elif prev is None:
-        print(f'\033[2m{ts}\033[0m {name}: warmpool={wp} (initial)', flush=True)
-" 2>/dev/null
+            if [[ -n "${prev}" && "${prev}" != "${wp}" ]]; then
+                echo -e "\033[1;33m⚡ ${ts}\033[0m ${name}: warmpool=${prev} → \033[1m${wp}\033[0m  ← IDENTITY CHANGE"
+            elif [[ -z "${prev}" ]]; then
+                echo -e "\033[2m${ts}\033[0m ${name}: warmpool=${wp} (initial)"
+            fi
+        done
 }
 
 # ---------------------------------------------------------------------------
@@ -150,8 +147,8 @@ watch_identities() {
         local total sandbox_ids
         total=$(kubectl get ciliumidentity --no-headers 2>/dev/null | wc -l | tr -d ' ')
 
-        sandbox_ids=$(kubectl get ciliumidentity -o jsonpath='{range .items[*]}{.security-labels}{"\n"}{end}' 2>/dev/null \
-            | grep -c 'is-sandbox' || echo 0)
+        sandbox_ids=$(kubectl get ciliumidentity -o json 2>/dev/null \
+            | jq '[.items[] | select(.["security-labels"] | to_entries | any(.key | test("is-sandbox")))] | length')
 
         local ts
         ts=$(date '+%H:%M:%S')
@@ -196,35 +193,25 @@ watch_endpoints() {
     info "Press Ctrl+C to stop."
     echo ""
 
+    declare -A seen
+
     kubectl get ciliumendpoints -n "${NAMESPACE}" -w -o json 2>/dev/null \
-        | python3 -u -c "
-import json, sys, datetime
+        | jq --unbuffered -c '{name: .metadata.name, id: (.status.identity.id // "?")}' 2>/dev/null \
+        | while IFS= read -r line; do
+            local name identity_id ts
+            name=$(echo "${line}" | jq -r '.name')
+            identity_id=$(echo "${line}" | jq -r '.id')
+            ts=$(date '+%H:%M:%S')
 
-seen = {}  # ep_name -> last identity_id
+            local prev="${seen[${name}]:-}"
+            seen["${name}"]="${identity_id}"
 
-for line in sys.stdin:
-    line = line.strip()
-    if not line:
-        continue
-    try:
-        obj = json.loads(line)
-    except json.JSONDecodeError:
-        continue
-
-    name = obj.get('metadata', {}).get('name', '?')
-    status = obj.get('status', {})
-    identity = status.get('identity', {})
-    identity_id = identity.get('id', '?')
-    ts = datetime.datetime.now().strftime('%H:%M:%S')
-
-    prev = seen.get(name)
-    seen[name] = identity_id
-
-    if prev is not None and prev != identity_id:
-        print(f'\033[1;33m⚡ {ts}\033[0m {name}: identity {prev} → \033[1m{identity_id}\033[0m  ← REGENERATED', flush=True)
-    elif prev is None:
-        print(f'\033[2m{ts}\033[0m {name}: identity={identity_id} (initial)', flush=True)
-" 2>/dev/null
+            if [[ -n "${prev}" && "${prev}" != "${identity_id}" ]]; then
+                echo -e "\033[1;33m⚡ ${ts}\033[0m ${name}: identity ${prev} → \033[1m${identity_id}\033[0m  ← REGENERATED"
+            elif [[ -z "${prev}" ]]; then
+                echo -e "\033[2m${ts}\033[0m ${name}: identity=${identity_id} (initial)"
+            fi
+        done
 }
 
 # ---------------------------------------------------------------------------

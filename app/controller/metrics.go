@@ -102,7 +102,8 @@ func extractHistogramSummary(h prometheus.Histogram) HistogramSummary {
 	}
 }
 
-// histogramQuantile computes an approximate quantile from histogram buckets.
+// histogramQuantile computes an approximate quantile from histogram buckets
+// using linear interpolation between bucket boundaries (same as Prometheus histogram_quantile).
 func histogramQuantile(q float64, hist *dto.Histogram) float64 {
 	buckets := hist.GetBucket()
 	if len(buckets) == 0 {
@@ -121,10 +122,24 @@ func histogramQuantile(q float64, hist *dto.Histogram) float64 {
 		return buckets[i].GetUpperBound() < buckets[j].GetUpperBound()
 	})
 
+	// Linear interpolation between bucket boundaries (Prometheus method).
+	var prevCount float64
+	var prevBound float64
 	for _, b := range buckets {
-		if float64(b.GetCumulativeCount()) >= rank {
-			return math.Round(b.GetUpperBound()*1000) / 1000
+		cumCount := float64(b.GetCumulativeCount())
+		if cumCount >= rank {
+			// Interpolate within this bucket.
+			bucketCount := cumCount - prevCount
+			if bucketCount == 0 {
+				return math.Round(b.GetUpperBound()*1000) / 1000
+			}
+			// How far into this bucket the rank falls (0.0 to 1.0).
+			fraction := (rank - prevCount) / bucketCount
+			interpolated := prevBound + fraction*(b.GetUpperBound()-prevBound)
+			return math.Round(interpolated*100) / 100
 		}
+		prevCount = cumCount
+		prevBound = b.GetUpperBound()
 	}
 
 	return math.Round(buckets[len(buckets)-1].GetUpperBound()*1000) / 1000

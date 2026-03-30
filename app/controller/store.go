@@ -90,12 +90,17 @@ func (s *Store) Remove(name string) {
 }
 
 // ResetObservations clears the observation flags on all sandboxes so metrics can be re-emitted.
+// Only resets ReadyObserved for idle pods — claimed pods should not be re-measured.
 func (s *Store) ResetObservations() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, sb := range s.sandboxes {
 		sb.ScheduleObserved = false
-		sb.ReadyObserved = false
+		// Only reset claim-to-ready for idle pods. Re-measuring active pods
+		// would produce false durations since DetachedAt is in the past.
+		if sb.State == "idle" || sb.State == "pending" {
+			sb.ReadyObserved = false
+		}
 	}
 }
 

@@ -46,3 +46,49 @@ Needed to replicate a production GKE cluster config (COS + gVisor sandbox, Cloud
 - All cluster features visible and tuneable in `.env`
 - Script logic unchanged — only values and conditional flags differ
 - Easy to toggle features on/off per environment
+
+## ADR-003: Cilium Identity Label Exclusion (Dataplane V2)
+
+**Date:** 2026-03-30
+**Status:** Accepted
+
+### Context
+
+In GKE Dataplane V2, Cilium computes a security identity from all pod labels. When sandbox pods transition from `warmpool=true` to `warmpool=false` during claim, Cilium generates a new identity for each unique label combination. With a warm pool of N pods, this causes N identity regenerations per benchmark cycle — unnecessary churn that wastes CPU and increases endpoint policy revision latency.
+
+### Decision
+
+- **Exclude `warmpool` from identity** via `cilium-config.data.labels = !warmpool` (not `cilium-config-emergency-override`, which is broken per GKE v1.34/1.35 known issue)
+- **Automation script** (`gke/manual/apply-cilium-identity-labels.sh`) follows the official [GKE workaround](https://docs.cloud.google.com/kubernetes-engine/docs/how-to/dataplane-v2#identity-relevant-label-filtering-issue): patch config → same-version master upgrade → anetd rolling restart
+- **ConfigMap-based config** persists through GKE upgrades since user modifications to `cilium-config` are preserved
+
+### Consequences
+
+- All sandbox pods share a single Cilium identity regardless of warmpool state
+- Claiming/releasing sandboxes no longer triggers endpoint regeneration
+- Script provides safe revert with automatic ConfigMap backup
+- Must be re-applied if more high-cardinality labels are introduced
+
+## ADR-004: Claim-to-Ready Metric in Handler, Not Reconciler
+
+**Date:** 2026-03-30
+**Status:** Accepted
+
+### Context
+
+The claim-to-ready metric was measured in the reconciler sync loop by recording `time.Since(DetachedAt)` when a claimed pod reported Ready=true. For warm-pool pods (already running and ready), this produced three categories of incorrect values: sub-millisecond (same-cycle), escalating stale (controller restart), or repeated (after metric reset).
+
+### Decision
+
+- **Record in the provision handler** (`handleProvision`), timing from claim start to successful K8s label patch. This measures the actual user-facing claim latency.
+- **Reconciler no longer measures claim-to-ready** — removed entirely to prevent stale/duplicate observations
+- **Pre-existing claimed pods on restart** use the `sandbox.gvisor/claimed-at` annotation for `DetachedAt` and are marked `ReadyObserved=true` to prevent measurement
+- **Histogram percentiles** use Prometheus-style linear interpolation between bucket boundaries instead of returning raw upper bounds
+
+### Consequences
+
+- Claim-to-ready reflects actual API latency (~50-100ms for warm-pool claims)
+- Metric is deterministic and reproducible (one observation per claim, in the handler)
+- Controller restarts do not pollute the metric
+- Reset Metrics only resets observations for idle/pending pods, not active ones
+

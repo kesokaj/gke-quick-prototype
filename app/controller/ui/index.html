@@ -734,12 +734,11 @@ async function restartPool() {
 }
 
 async function resetMetrics() {
-  if (!confirm('Reset all metric counters?')) return;
   try {
     const res = await fetch(`${API}/api/metrics/reset`, { method:'POST' });
     if (res.ok) {
       toast('Metrics reset', 'success');
-      refreshMetrics();
+      fetchMetricsSummary();
     } else {
       const d = await res.json();
       toast(d.error || 'Failed', 'error');

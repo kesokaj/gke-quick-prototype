@@ -160,6 +160,7 @@ func (h *Handlers) handleProvision(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slog.Info("provisioning sandbox", "name", sb.Name, "lifetime", req.Lifetime)
+	claimStart := time.Now()
 
 	// Detach pod from Deployment by changing warmpool=false.
 	// This orphans the pod — K8s does NOT terminate orphans.
@@ -185,6 +186,13 @@ func (h *Handlers) handleProvision(w http.ResponseWriter, r *http.Request) {
 	sb.Config = &ProvisionConfig{
 		Lifetime: req.Lifetime,
 	}
+
+	// Record claim-to-ready metric: time from claim start to successful patch.
+	// For warm-pool pods this captures the actual end-to-end claim latency.
+	claimDuration := time.Since(claimStart).Seconds()
+	sandboxClaimToReady.Observe(claimDuration)
+	sb.ReadyObserved = true
+	slog.Info("metric: claim-to-ready", "name", sb.Name, "duration_s", fmt.Sprintf("%.3f", claimDuration))
 
 	h.store.Upsert(sb)
 

@@ -168,8 +168,20 @@ func (r *Reconciler) sync(ctx context.Context) {
 
 		// Detect detach time if transitioning to active.
 		if state == "active" && !exists {
-			now := time.Now()
-			sb.DetachedAt = &now
+			// Controller restart: pod was already claimed before this controller started.
+			// Use the claimed-at annotation for accurate timing, not time.Now().
+			if claimedAt, ok := pod.Annotations["sandbox.gvisor/claimed-at"]; ok {
+				if t, err := time.Parse(time.RFC3339, claimedAt); err == nil {
+					sb.DetachedAt = &t
+				}
+			}
+			if sb.DetachedAt == nil {
+				now := time.Now()
+				sb.DetachedAt = &now
+			}
+			// Pre-existing claimed pods: mark as observed to avoid stale measurements.
+			// The real claim-to-ready was lost when the controller restarted.
+			sb.ReadyObserved = true
 		}
 		if state == "active" && exists && existing.State == "idle" {
 			now := time.Now()
@@ -183,15 +195,6 @@ func (r *Reconciler) sync(ctx context.Context) {
 			sandboxScheduleDuration.Observe(duration)
 			sb.ScheduleObserved = true
 			slog.Info("metric: sandbox scheduled", "name", sb.Name, "duration_s", fmt.Sprintf("%.3f", duration))
-		}
-
-		// --- Metrics: claim-to-ready ---
-		// When a claimed pod first reports Ready=true, record time since claim.
-		if state == "active" && podReady && sb.DetachedAt != nil && !sb.ReadyObserved {
-			duration := time.Since(*sb.DetachedAt).Seconds()
-			sandboxClaimToReady.Observe(duration)
-			sb.ReadyObserved = true
-			slog.Info("metric: claim-to-ready", "name", sb.Name, "duration_s", fmt.Sprintf("%.3f", duration))
 		}
 
 		r.store.Upsert(sb)
