@@ -1,52 +1,62 @@
-# GKE Cluster Lifecycle
+# GKE Sandbox Infrastructure
 
-Idempotent, `.env`-driven GKE cluster lifecycle management with two node pools, network tuning, and DPv2 Scale-Optimized dataplane.
+Idempotent, `.env`-driven GKE cluster lifecycle management with gVisor sandboxing, warm pool controller, and full observability.
 
-## Quick Start
+## Prerequisites
+
+| Tool | Purpose | Install |
+|------|---------|---------|
+| **gcloud CLI** | GCP resource management | [cloud.google.com/sdk](https://cloud.google.com/sdk/docs/install) |
+| **kubectl** | Kubernetes cluster access | `gcloud components install kubectl` |
+| **Docker** | Container image builds (ARM Mac → AMD64) | Docker Desktop or [Colima](https://github.com/abiosoft/colima) |
+| **Go 1.24+** | Local builds and `go vet` | [go.dev/dl](https://go.dev/dl/) |
+| **python3** | Cilium config JSON extraction (used by cluster.sh) | System default or Homebrew |
+
+> **Note:** `gcloud auth login` and `gcloud auth configure-docker ${REGION}-docker.pkg.dev` must be run before first use.
+
+## Quick Start — Zero to Running
 
 ```bash
 # 1. Configure
-cp .env.example .env   # or edit .env directly
-vim .env
+cp .env.example .env
+vim .env                            # Set PROJECT, CLUSTER_NAME, VPC, etc.
 
-# 2. Create everything (idempotent — safe to re-run)
+# 2. Create cluster (VPC + subnet + GKE + node pools + monitoring)
 ./cluster.sh create
 
-# 3. Apply secondary pool k8s manifests
-./cluster.sh apply
+# 3. Build, push, and deploy app (controller + sandbox pods + ws-server)
+cd app && ./deploy.sh all 5         # 5 = sandbox pool size
 
-# 4. Check status
+# 4. (Optional) Deploy GCP monitoring dashboard
+cd ../gcp && ./deploy-dashboard.sh
+
+# 5. Verify
 ./cluster.sh status
+kubectl get pods -n sandbox -l warmpool=true
+kubectl get pods -n sandbox-control
 ```
 
-## What `./cluster.sh create` Builds
+### What Gets Created
 
-All resources are created idempotently — the script detects existing resources and skips them.
-
-| Stage | Resources |
-|---|---|
-| **Service Accounts** | `gke-default` + `gke-secondary` (role: owner) |
-| **VPC** | Custom-mode VPC with subnet + secondary ranges (pods/services) |
-| **Firewall Rules** | ICMP, SSH, RDP, Load Balancer healthcheck, IAP, internal |
-| **Cloud NAT** | Dynamic port allocation, high-churn timeouts, 1024 min ports/VM |
-| **GKE Cluster** | Private cluster, DPv2, Cloud DNS, Workload Identity, conditional addons |
-| **Default Pool** | Static node count (1/zone), shielded instance |
-| **Secondary Pool** | Fully configurable from `.env`, COS image, gVisor sandbox, GCFS |
-| **Shared K8s Configs** | Cilium override, Cilium/netd/kubelet/controller monitoring (all 10s scrape) |
+| Stage | Script | Resources |
+|-------|--------|-----------|
+| **Infrastructure** | `cluster.sh create` | VPC, subnet, firewall rules, Cloud NAT, GKE cluster, 2 node pools, service accounts, Cilium config, monitoring DaemonSets |
+| **Application** | `deploy.sh all` | Sandbox controller (1 replica), sandbox pool (N replicas), ws-server on Cloud Run, Workload Identity bindings, NetworkPolicy |
+| **Observability** | `deploy-dashboard.sh` | GCP Monitoring dashboard with sandbox lifecycle, kubelet, Cilium, and API server metrics |
 
 ## Configuration
 
-All settings are in **`.env`**. The file is self-documented with inline comments.
+All settings are in **`.env`**. Copy from `.env.example` and customize.
 
 ### Key Sections
 
 | Section | What it controls |
-|---|---|
+|---------|------------------|
 | **Project & Region** | GCP project, cluster name, region, release channel |
 | **Network** | VPC, subnet, CIDR ranges, Cloud NAT toggle |
 | **Default Pool** | Machine type, disk, node count, shielded, auto-repair/upgrade |
 | **Secondary Pool** | Machine type, disk, image, autoscaling, spot, gVisor, GCFS, shielded, tags, labels, taints |
-| **Cluster Features** | Autoscaling profile, VPA, HPA, Cloud DNS, DNS cache, Filestore CSI, image streaming, cost allocation, Secret Manager, fleet |
+| **Cluster Features** | Autoscaling profile, VPA, HPA, Cloud DNS, DNS cache, ILB subsetting, Filestore CSI, image streaming, cost allocation, Secret Manager, fleet |
 
 ### Optional Flags Pattern
 
@@ -58,8 +68,6 @@ SECONDARY_GVNIC="true"          # --enable-gvnic added
 ```
 
 ### Dependent Settings
-
-Some settings require companion values:
 
 ```bash
 # Autoscaling requires MIN/MAX when enabled
@@ -74,18 +82,54 @@ SECONDARY_THREADS_PER_CORE="2"  # Required when NESTED_VIRT=true
 
 > **Note:** `AUTO_UPGRADE` must be `true` when using a release channel (RAPID/REGULAR/STABLE).
 
-## Secondary Pool Node Config
+## Commands
 
-The secondary pool can optionally apply a node system config file via `SECONDARY_SYSTEM_CONFIG` in `.env`. Set the path to a YAML file with kubelet and sysctl tuning. Leave empty to skip.
+### Infrastructure (`cluster.sh`)
 
-The pool uses **gVisor** sandbox runtime (`--sandbox type=gvisor`) and **COS_CONTAINERD** image by default. GCFS (image streaming) is enabled at the node pool level.
+```bash
+./cluster.sh create  [--dry-run]   # VPC + subnet + cluster + secondary pool + shared configs
+./cluster.sh apply   [--dry-run]   # Apply gke/secondary/ manifests (optional per-pool configs)
+./cluster.sh delete  [--dry-run]   # Delete cluster (preserves VPC)
+./cluster.sh status                # Show cluster + node pool info
+```
+
+### Application (`app/deploy.sh`)
+
+```bash
+./deploy.sh build                  # Build container images locally (ARM Mac → AMD64)
+./deploy.sh push                   # Push to Google Artifact Registry
+./deploy.sh deploy [REPLICAS]      # Apply K8s manifests (default: 5)
+./deploy.sh all [REPLICAS]         # Build + push + deploy
+./deploy.sh teardown               # Delete all app resources + Cloud Run + monitoring
+```
+
+Use `--dry-run` to preview gcloud commands without executing them.
+
+## Operations
+
+```bash
+# Watch sandbox pods
+kubectl get pods -n sandbox -l warmpool=true -w
+
+# Controller logs
+kubectl logs -n sandbox-control deploy/sandbox-controller -f
+
+# Controller UI (port-forward)
+kubectl port-forward -n sandbox-control svc/sandbox-controller 8080:8080
+
+# WS Server logs (Cloud Run)
+gcloud run services logs read sandbox-ws-server --region=${REGION} --limit=50
+
+# Teardown everything
+cd app && ./deploy.sh teardown
+```
 
 ## Shared K8s Configs
 
 Applied automatically during `./cluster.sh create`:
 
 | File | Purpose |
-|---|---|
+|------|---------|
 | `gke/shared/cilium-config-override.yaml` | DPv2 scale-optimized tuning (monitor aggregation, eBPF map sizes, rate limits) |
 | `gke/shared/cilium-pod-monitoring.yaml` | GMP `ClusterPodMonitoring` for anetd (port 9990, 10s) |
 | `gke/shared/netd-conntrack-monitoring.yaml` | `prometheus-to-sd` DaemonSet pushing conntrack/socket metrics to Cloud Monitoring (all nodes) |
@@ -93,23 +137,12 @@ Applied automatically during `./cluster.sh create`:
 | `gke/shared/controller-pod-monitoring.yaml` | GMP `PodMonitoring` for sandbox-controller (port 8080, 10s) |
 | `gke/shared/kubelet-extra-monitoring.yaml` | GMP `ClusterNodeMonitoring` for kubelet metrics (10s) |
 
-## Commands
-
-```bash
-./cluster.sh create  [--dry-run]   # VPC + subnet + cluster + secondary pool + shared configs
-./cluster.sh apply   [--dry-run]   # Apply gke/secondary/ manifests
-./cluster.sh delete  [--dry-run]   # Delete cluster (preserves VPC)
-./cluster.sh status                # Show cluster + node pool info
-```
-
-Use `--dry-run` to preview gcloud commands without executing them.
-
 ## Project Structure
 
 ```
 .
 ├── .env                                # All configuration
-├── cluster.sh                          # Lifecycle entrypoint
+├── cluster.sh                          # Infrastructure lifecycle
 ├── app/
 │   ├── controller/                     # Warm pool controller (Go)
 │   ├── sandbox/                        # Simulation pod binary (Go)
@@ -126,9 +159,13 @@ Use `--dry-run` to preview gcloud commands without executing them.
 │   │   └── kubelet-extra-monitoring.yaml
 │   ├── manual/                         # Manual-apply configs (not auto-deployed)
 │   │   └── cilium-identity-labels-patch.yaml
-│   └── secondary/                      # Secondary pool configs
+│   └── secondary/                      # Secondary pool configs (optional)
 ├── gcp/
 │   ├── dashboard.json.tpl              # GCP Monitoring dashboard template (__CLUSTER_NAME__ placeholder)
 │   └── deploy-dashboard.sh             # Dashboard deploy script (delete + create)
+├── docs/
+│   ├── changes/                        # Change logs
+│   ├── architecture/                   # ADRs
+│   └── specs/                          # Integration specs
 └── README.md
 ```

@@ -2247,6 +2247,218 @@
                                     }
                               }
                         }
+                  },
+                  {
+                        "yPos": 408,
+                        "xPos": 0,
+                        "width": 48,
+                        "height": 4,
+                        "widget": {
+                              "title": "",
+                              "text": {
+                                    "content": "# 🔗 WebSocket Session (Cloud Run)",
+                                    "format": "MARKDOWN",
+                                    "style": {}
+                              }
+                        }
+                  },
+                  {
+                        "yPos": 412,
+                        "xPos": 0,
+                        "width": 16,
+                        "height": 16,
+                        "widget": {
+                              "title": "WS Request Count",
+                              "xyChart": {
+                                    "dataSets": [
+                                          {
+                                                "timeSeriesQuery": {
+                                                      "timeSeriesFilter": {
+                                                            "filter": "metric.type=\"run.googleapis.com/request_count\" resource.type=\"cloud_run_revision\" resource.label.\"service_name\"=\"sandbox-ws-server\"",
+                                                            "aggregation": {
+                                                                  "alignmentPeriod": "60s",
+                                                                  "perSeriesAligner": "ALIGN_RATE",
+                                                                  "crossSeriesReducer": "REDUCE_SUM",
+                                                                  "groupByFields": [
+                                                                        "metric.label.\"response_code_class\""
+                                                                  ]
+                                                            }
+                                                      }
+                                                },
+                                                "plotType": "STACKED_AREA",
+                                                "minAlignmentPeriod": "60s"
+                                          }
+                                    ],
+                                    "yAxis": {
+                                          "label": "Requests/s",
+                                          "scale": "LINEAR"
+                                    },
+                                    "chartOptions": {
+                                          "mode": "COLOR"
+                                    }
+                              }
+                        }
+                  },
+                  {
+                        "yPos": 412,
+                        "xPos": 16,
+                        "width": 16,
+                        "height": 16,
+                        "widget": {
+                              "title": "⚠️ WS Request Latency (p50 / p99)",
+                              "xyChart": {
+                                    "dataSets": [
+                                          {
+                                                "timeSeriesQuery": {
+                                                      "timeSeriesFilter": {
+                                                            "filter": "metric.type=\"run.googleapis.com/request_latencies\" resource.type=\"cloud_run_revision\" resource.label.\"service_name\"=\"sandbox-ws-server\"",
+                                                            "aggregation": {
+                                                                  "alignmentPeriod": "60s",
+                                                                  "perSeriesAligner": "ALIGN_PERCENTILE_99",
+                                                                  "crossSeriesReducer": "REDUCE_MEAN",
+                                                                  "groupByFields": []
+                                                            }
+                                                      }
+                                                },
+                                                "plotType": "LINE",
+                                                "minAlignmentPeriod": "60s",
+                                                "legendTemplate": "p99"
+                                          },
+                                          {
+                                                "timeSeriesQuery": {
+                                                      "timeSeriesFilter": {
+                                                            "filter": "metric.type=\"run.googleapis.com/request_latencies\" resource.type=\"cloud_run_revision\" resource.label.\"service_name\"=\"sandbox-ws-server\"",
+                                                            "aggregation": {
+                                                                  "alignmentPeriod": "60s",
+                                                                  "perSeriesAligner": "ALIGN_PERCENTILE_50",
+                                                                  "crossSeriesReducer": "REDUCE_MEAN",
+                                                                  "groupByFields": []
+                                                            }
+                                                      }
+                                                },
+                                                "plotType": "LINE",
+                                                "minAlignmentPeriod": "60s",
+                                                "legendTemplate": "p50"
+                                          }
+                                    ],
+                                    "yAxis": {
+                                          "label": "ms",
+                                          "scale": "LINEAR"
+                                    },
+                                    "chartOptions": {
+                                          "mode": "COLOR"
+                                    }
+                              }
+                        }
+                  },
+                  {
+                        "yPos": 412,
+                        "xPos": 32,
+                        "width": 16,
+                        "height": 16,
+                        "widget": {
+                              "title": "WS Active Instances",
+                              "xyChart": {
+                                    "dataSets": [
+                                          {
+                                                "timeSeriesQuery": {
+                                                      "timeSeriesFilter": {
+                                                            "filter": "metric.type=\"run.googleapis.com/container/instance_count\" resource.type=\"cloud_run_revision\" resource.label.\"service_name\"=\"sandbox-ws-server\"",
+                                                            "aggregation": {
+                                                                  "alignmentPeriod": "60s",
+                                                                  "perSeriesAligner": "ALIGN_MEAN",
+                                                                  "crossSeriesReducer": "REDUCE_SUM",
+                                                                  "groupByFields": [
+                                                                        "metric.label.\"state\""
+                                                                  ]
+                                                            }
+                                                      }
+                                                },
+                                                "plotType": "STACKED_AREA",
+                                                "minAlignmentPeriod": "60s"
+                                          }
+                                    ],
+                                    "yAxis": {
+                                          "label": "Instances",
+                                          "scale": "LINEAR"
+                                    },
+                                    "chartOptions": {
+                                          "mode": "COLOR"
+                                    }
+                              }
+                        }
+                  },
+                  {
+                        "yPos": 428,
+                        "xPos": 0,
+                        "width": 24,
+                        "height": 16,
+                        "widget": {
+                              "title": "⚠️ WS 4xx / 5xx Errors",
+                              "xyChart": {
+                                    "dataSets": [
+                                          {
+                                                "timeSeriesQuery": {
+                                                      "timeSeriesFilter": {
+                                                            "filter": "metric.type=\"run.googleapis.com/request_count\" resource.type=\"cloud_run_revision\" resource.label.\"service_name\"=\"sandbox-ws-server\" metric.label.\"response_code_class\"=monitoring.regex.full_match(\"4xx|5xx\")",
+                                                            "aggregation": {
+                                                                  "alignmentPeriod": "60s",
+                                                                  "perSeriesAligner": "ALIGN_RATE",
+                                                                  "crossSeriesReducer": "REDUCE_SUM",
+                                                                  "groupByFields": [
+                                                                        "metric.label.\"response_code_class\""
+                                                                  ]
+                                                            }
+                                                      }
+                                                },
+                                                "plotType": "STACKED_BAR",
+                                                "minAlignmentPeriod": "60s"
+                                          }
+                                    ],
+                                    "yAxis": {
+                                          "label": "Errors/s",
+                                          "scale": "LINEAR"
+                                    },
+                                    "chartOptions": {
+                                          "mode": "COLOR"
+                                    }
+                              }
+                        }
+                  },
+                  {
+                        "yPos": 428,
+                        "xPos": 24,
+                        "width": 24,
+                        "height": 16,
+                        "widget": {
+                              "title": "WS Billable Instance Time",
+                              "xyChart": {
+                                    "dataSets": [
+                                          {
+                                                "timeSeriesQuery": {
+                                                      "timeSeriesFilter": {
+                                                            "filter": "metric.type=\"run.googleapis.com/container/billable_instance_time\" resource.type=\"cloud_run_revision\" resource.label.\"service_name\"=\"sandbox-ws-server\"",
+                                                            "aggregation": {
+                                                                  "alignmentPeriod": "60s",
+                                                                  "perSeriesAligner": "ALIGN_RATE",
+                                                                  "crossSeriesReducer": "REDUCE_SUM",
+                                                                  "groupByFields": []
+                                                            }
+                                                      }
+                                                },
+                                                "plotType": "LINE",
+                                                "minAlignmentPeriod": "60s"
+                                          }
+                                    ],
+                                    "yAxis": {
+                                          "label": "Instance-seconds/s",
+                                          "scale": "LINEAR"
+                                    },
+                                    "chartOptions": {
+                                          "mode": "COLOR"
+                                    }
+                              }
+                        }
                   }
             ]
       }

@@ -48,10 +48,13 @@ REGION="${REGION:-europe-west4}"
 REPO_NAME="sandbox"
 SANDBOX_IMAGE_NAME="sandbox-sim"
 CONTROLLER_IMAGE_NAME="sandbox-controller"
+WS_SERVER_IMAGE_NAME="ws-server"
+WS_SERVER_SERVICE_NAME="sandbox-ws-server"
 SANDBOX_SA="sandbox-sa"
 SANDBOX_NAMESPACE="sandbox"
 
 REGISTRY="${REGION}-docker.pkg.dev/${PROJECT}/${REPO_NAME}"
+WS_SERVER_HTTPS_URL=""
 
 
 TAG_FILE="${SCRIPT_DIR}/.current-tag"
@@ -74,13 +77,6 @@ current_tag() {
     fi
 }
 
-# Per-component content hash — detects actual code changes.
-content_hash() {
-    local dir="$1"
-    find "${dir}" -maxdepth 1 -type f \( -name '*.go' -o -name 'go.mod' -o -name 'go.sum' -o -name 'Dockerfile' \) \
-        -print0 | sort -z | xargs -0 cat | shasum -a 256 | cut -c1-7
-}
-
 # ---------------------------------------------------------------------------
 # Validation
 # ---------------------------------------------------------------------------
@@ -89,6 +85,15 @@ validate() {
     command -v docker >/dev/null 2>&1 || fail "docker not found"
     command -v gcloud >/dev/null 2>&1 || fail "gcloud not found"
     command -v kubectl >/dev/null 2>&1 || fail "kubectl not found"
+
+    # Sanity check: warn if kubectl context doesn't match the expected cluster.
+    local ctx
+    ctx=$(kubectl config current-context 2>/dev/null || echo "")
+    if [[ -n "${ctx}" ]] && [[ "${ctx}" != *"${CLUSTER_NAME}"* ]]; then
+        warn "kubectl context '${ctx}' may not match CLUSTER_NAME='${CLUSTER_NAME}'"
+        warn "Run: gcloud container clusters get-credentials ${CLUSTER_NAME} --region=${REGION} --project=${PROJECT}"
+    fi
+
     log "Project:    ${PROJECT}"
     log "Region:     ${REGION}"
     log "Registry:   ${REGISTRY}"
@@ -213,6 +218,26 @@ cmd_build() {
         ok "Controller image built via Cloud Build: ${controller_image}"
     fi
 
+    # Build ws-server image
+    local ws_image="${REGISTRY}/${WS_SERVER_IMAGE_NAME}:${tag}"
+    log "Building ws-server image (linux/amd64)..."
+    if docker buildx version &>/dev/null; then
+        docker buildx build \
+            --platform linux/amd64 \
+            --provenance=false \
+            -t "${ws_image}" \
+            --load \
+            "${SCRIPT_DIR}/ws-server"
+        ok "WS server image built: ${ws_image}"
+    else
+        gcloud builds submit \
+            --tag "${ws_image}" \
+            --project="${PROJECT}" \
+            --quiet \
+            "${SCRIPT_DIR}/ws-server"
+        ok "WS server image built via Cloud Build: ${ws_image}"
+    fi
+
     # Store tag
     echo "${tag}" > "${TAG_FILE}"
     ok "Tag saved to ${TAG_FILE}: ${tag}"
@@ -241,6 +266,11 @@ cmd_push() {
     log "Pushing controller image..."
     docker push "${controller_image}"
     ok "Controller image pushed: ${controller_image}"
+
+    local ws_image="${REGISTRY}/${WS_SERVER_IMAGE_NAME}:${tag}"
+    log "Pushing ws-server image..."
+    docker push "${ws_image}"
+    ok "WS server image pushed: ${ws_image}"
 }
 
 # ---------------------------------------------------------------------------
@@ -295,21 +325,6 @@ ensure_sandbox_sa() {
 }
 
 # ---------------------------------------------------------------------------
-# Ensure sandbox pool deployment
-# ---------------------------------------------------------------------------
-ensure_sandbox_pool() {
-    local sandbox_image="$1"
-    local replicas="$2"
-
-    log "Ensuring sandbox pool deployment (${replicas} replicas)..."
-    sed "s|IMAGE_PLACEHOLDER|${sandbox_image}|g" "${SCRIPT_DIR}/manifests/deployment.yaml" \
-        | sed "s|replicas: 0|replicas: ${replicas}|g" \
-        | kubectl apply -f -
-    ok "Sandbox pool deployed: ${replicas} replicas"
-}
-
-
-# ---------------------------------------------------------------------------
 # Ensure NetworkPolicy
 # ---------------------------------------------------------------------------
 ensure_network_policy() {
@@ -318,6 +333,70 @@ ensure_network_policy() {
         kubectl apply -f "${SCRIPT_DIR}/manifests/sandbox-isolation.yaml"
         ok "NetworkPolicy applied"
     fi
+}
+
+# ---------------------------------------------------------------------------
+# Ensure ws-server deployed to Cloud Run
+# ---------------------------------------------------------------------------
+ensure_ws_server() {
+    local ws_image="$1"
+    local gcp_sa="${SANDBOX_SA}@${PROJECT}.iam.gserviceaccount.com"
+
+    log "Deploying ws-server to Cloud Run..."
+    local deploy_output
+    deploy_output=$(gcloud run deploy "${WS_SERVER_SERVICE_NAME}" \
+        --project="${PROJECT}" \
+        --region="${REGION}" \
+        --image="${ws_image}" \
+        --platform=managed \
+        --no-allow-unauthenticated \
+        --port=8080 \
+        --min-instances=0 \
+        --max-instances=10 \
+        --timeout=3600 \
+        --session-affinity \
+        --cpu=1 \
+        --memory=256Mi \
+        --quiet 2>&1)
+
+    ok "WS server deployed to Cloud Run: ${WS_SERVER_SERVICE_NAME}"
+
+    # Extract the service URL from deploy output (e.g. "Service URL: https://...").
+    WS_SERVER_HTTPS_URL=$(echo "${deploy_output}" | grep -oE 'https://[^ ]+' | head -1)
+    if [[ -z "${WS_SERVER_HTTPS_URL}" ]]; then
+        # Fallback: use gcloud describe.
+        WS_SERVER_HTTPS_URL=$(gcloud run services describe "${WS_SERVER_SERVICE_NAME}" \
+            --project="${PROJECT}" \
+            --region="${REGION}" \
+            --format="value(status.url)" 2>/dev/null)
+    fi
+    log "Cloud Run URL: ${WS_SERVER_HTTPS_URL}"
+
+    # Grant sandbox SA permission to invoke the Cloud Run service.
+    log "Ensuring sandbox-sa can invoke ws-server..."
+    gcloud run services add-iam-policy-binding "${WS_SERVER_SERVICE_NAME}" \
+        --project="${PROJECT}" \
+        --region="${REGION}" \
+        --member="serviceAccount:${gcp_sa}" \
+        --role=roles/run.invoker \
+        --quiet &>/dev/null
+    ok "IAM binding: ${SANDBOX_SA} → roles/run.invoker on ${WS_SERVER_SERVICE_NAME}"
+}
+
+# Get Cloud Run ws-server URL (uses cached value from ensure_ws_server if available)
+get_ws_server_url() {
+    local url="${WS_SERVER_HTTPS_URL}"
+    if [[ -z "${url}" ]]; then
+        url=$(gcloud run services describe "${WS_SERVER_SERVICE_NAME}" \
+            --project="${PROJECT}" \
+            --region="${REGION}" \
+            --format="value(status.url)" 2>/dev/null)
+    fi
+    if [[ -z "${url}" ]]; then
+        fail "Could not retrieve ws-server Cloud Run URL"
+    fi
+    # Convert https://... to wss://.../ws
+    echo "${url/https:/wss:}/ws"
 }
 
 # ---------------------------------------------------------------------------
@@ -343,10 +422,12 @@ cmd_deploy() {
 
     local sandbox_image="${REGISTRY}/${SANDBOX_IMAGE_NAME}:${tag}"
     local controller_image="${REGISTRY}/${CONTROLLER_IMAGE_NAME}:${tag}"
+    local ws_image="${REGISTRY}/${WS_SERVER_IMAGE_NAME}:${tag}"
 
     log "Deploying with tag: ${tag}"
     log "Sandbox:    ${sandbox_image}"
     log "Controller: ${controller_image}"
+    log "WS Server:  ${ws_image}"
 
     ensure_namespaces
     ensure_controller "${controller_image}"
@@ -355,7 +436,21 @@ cmd_deploy() {
 
     ensure_workload_identity
     ensure_sandbox_sa
-    ensure_sandbox_pool "${sandbox_image}" "${replicas}"
+
+    # Deploy ws-server to Cloud Run and get its URL.
+    ensure_ws_server "${ws_image}"
+    local ws_url
+    ws_url=$(get_ws_server_url)
+    log "WS Server URL: ${ws_url}"
+
+    # Deploy sandbox pool with the WS server URL injected.
+    log "Ensuring sandbox pool deployment (${replicas} replicas)..."
+    sed "s|IMAGE_PLACEHOLDER|${sandbox_image}|g" "${SCRIPT_DIR}/manifests/deployment.yaml" \
+        | sed "s|replicas: 0|replicas: ${replicas}|g" \
+        | sed "s|WS_SERVER_URL_PLACEHOLDER|${ws_url}|g" \
+        | kubectl apply -f -
+    ok "Sandbox pool deployed: ${replicas} replicas (WS → ${ws_url})"
+
     ensure_network_policy
     ensure_monitoring
 
@@ -363,6 +458,7 @@ cmd_deploy() {
     log "Watch pods:      kubectl get pods -n sandbox -l warmpool=true -w"
     log "Controller logs: kubectl logs -n sandbox-control deploy/sandbox-controller -f"
     log "Controller UI:   kubectl port-forward -n sandbox-control svc/sandbox-controller 8080:8080"
+    log "WS Server logs:  gcloud run services logs read ${WS_SERVER_SERVICE_NAME} --region=${REGION} --limit=50"
     log "Teardown:        ./deploy.sh teardown"
 }
 
@@ -382,6 +478,22 @@ cmd_teardown() {
     kubectl delete networkpolicy sandbox-isolation -n sandbox --ignore-not-found
     kubectl delete namespace sandbox-control --ignore-not-found
     kubectl delete namespace sandbox --ignore-not-found
+
+    # Clean up cluster-scoped monitoring resources (survive namespace deletion).
+    log "Cleaning up cluster-scoped monitoring resources..."
+    kubectl delete clusternodemonitoring sandbox-kubelet-extra --ignore-not-found 2>/dev/null || true
+    kubectl delete daemonset conntrack-reporter -n gmp-public --ignore-not-found 2>/dev/null || true
+    kubectl delete daemonset gvisor-metrics-reporter -n gmp-public --ignore-not-found 2>/dev/null || true
+    ok "Cluster-scoped monitoring resources cleaned"
+
+    # Delete Cloud Run ws-server
+    log "Deleting Cloud Run ws-server..."
+    gcloud run services delete "${WS_SERVER_SERVICE_NAME}" \
+        --project="${PROJECT}" \
+        --region="${REGION}" \
+        --quiet 2>/dev/null || true
+    ok "Cloud Run ws-server deleted"
+
     ok "All sandbox resources deleted"
 }
 

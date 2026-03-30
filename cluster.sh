@@ -42,16 +42,16 @@ header() { echo -e "\n${CYAN}━━━ $* ━━━${NC}\n"; }
 # Configuration (sourced from .env, with fallbacks)
 # ---------------------------------------------------------------------------
 PROJECT="${PROJECT:-$(gcloud config get-value project 2>/dev/null)}"
-CLUSTER_NAME="${CLUSTER_NAME:-sandbox-testing}"
+CLUSTER_NAME="${CLUSTER_NAME:-my-cluster}"
 REGION="${REGION:-europe-west4}"
-RELEASE_CHANNEL="${RELEASE_CHANNEL:-rapid}"
+RELEASE_CHANNEL="${RELEASE_CHANNEL:-REGULAR}"
 RELEASE_CHANNEL="${RELEASE_CHANNEL,,}"  # gcloud requires lowercase
 CLUSTER_VERSION="${CLUSTER_VERSION:-}"
 
 # Network
-VPC="${VPC:-kfg-network}"
+VPC="${VPC:-my-network}"
 VPC_MTU="${VPC_MTU:-1460}"
-SUBNET="${SUBNET:-kfg-subnet-${REGION}}"
+SUBNET="${SUBNET:-my-subnet-${REGION}}"
 SUBNET_RANGE="${SUBNET_RANGE:-10.10.0.0/20}"
 SUBNET_SECONDARY_PODS="${SUBNET_SECONDARY_PODS:-10.100.0.0/16}"
 SUBNET_SECONDARY_SERVICE="${SUBNET_SECONDARY_SERVICE:-10.200.0.0/20}"
@@ -71,14 +71,14 @@ DEFAULT_GVNIC="${DEFAULT_GVNIC:-}"
 DEFAULT_SHIELDED_SECURE_BOOT="${DEFAULT_SHIELDED_SECURE_BOOT:-}"
 DEFAULT_SHIELDED_INTEGRITY="${DEFAULT_SHIELDED_INTEGRITY:-}"
 DEFAULT_AUTO_REPAIR="${DEFAULT_AUTO_REPAIR:-true}"
-DEFAULT_AUTO_UPGRADE="${DEFAULT_AUTO_UPGRADE:-false}"
+DEFAULT_AUTO_UPGRADE="${DEFAULT_AUTO_UPGRADE:-true}"
 
 # Secondary pool
 SECONDARY_MACHINE_TYPE="${SECONDARY_MACHINE_TYPE:-n2-standard-8}"
 SECONDARY_DISK_TYPE="${SECONDARY_DISK_TYPE:-pd-ssd}"
 SECONDARY_DISK_SIZE="${SECONDARY_DISK_SIZE:-300}"
 SECONDARY_IMAGE_TYPE="${SECONDARY_IMAGE_TYPE:-COS_CONTAINERD}"
-SECONDARY_AUTOSCALING="${SECONDARY_AUTOSCALING:-true}"
+SECONDARY_AUTOSCALING="${SECONDARY_AUTOSCALING:-false}"
 SECONDARY_NUM_NODES="${SECONDARY_NUM_NODES:-0}"
 SECONDARY_MIN_NODES="${SECONDARY_MIN_NODES:-0}"
 SECONDARY_MAX_NODES="${SECONDARY_MAX_NODES:-100}"
@@ -93,7 +93,7 @@ SECONDARY_SHIELDED_INTEGRITY="${SECONDARY_SHIELDED_INTEGRITY:-}"
 SECONDARY_NESTED_VIRT="${SECONDARY_NESTED_VIRT:-}"
 SECONDARY_THREADS_PER_CORE="${SECONDARY_THREADS_PER_CORE:-}"
 SECONDARY_AUTO_REPAIR="${SECONDARY_AUTO_REPAIR:-true}"
-SECONDARY_AUTO_UPGRADE="${SECONDARY_AUTO_UPGRADE:-false}"
+SECONDARY_AUTO_UPGRADE="${SECONDARY_AUTO_UPGRADE:-true}"
 SECONDARY_TAGS="${SECONDARY_TAGS:-}"
 SECONDARY_LABELS="${SECONDARY_LABELS:-}"
 SECONDARY_TAINTS="${SECONDARY_TAINTS:-}"
@@ -149,6 +149,9 @@ ensure_apis() {
         # Artifact & build
         artifactregistry.googleapis.com
         cloudbuild.googleapis.com
+
+        # Cloud Run (ws-server)
+        run.googleapis.com
 
         # Storage
         storage.googleapis.com
@@ -397,7 +400,6 @@ cmd_create() {
             # DPv2 Scale-Optimized: disable overhead
             --in-transit-encryption=none
             --disable-l4-lb-firewall-reconciliation
-            --enable-l4-ilb-subsetting
 
             # Private cluster
             --enable-private-nodes
@@ -428,6 +430,7 @@ cmd_create() {
         [[ "${ENABLE_IMAGE_STREAMING}" == "true" ]] && cluster_cmd+=(--enable-image-streaming)
         [[ "${ENABLE_COST_ALLOCATION}" == "true" ]] && cluster_cmd+=(--enable-cost-allocation)
         [[ "${ENABLE_SECRET_MANAGER}" == "true" ]] && cluster_cmd+=(--enable-secret-manager)
+        [[ "${ENABLE_L4_ILB_SUBSETTING}" == "true" ]] && cluster_cmd+=(--enable-l4-ilb-subsetting)
         [[ -n "${CLUSTER_DNS}" ]] && cluster_cmd+=(--cluster-dns="${CLUSTER_DNS}" --cluster-dns-scope="${CLUSTER_DNS_SCOPE}")
         [[ -n "${FLEET_PROJECT}" ]] && cluster_cmd+=(--fleet-project="${FLEET_PROJECT}")
 
@@ -575,7 +578,6 @@ apply_shared() {
         "cilium-pod-monitoring.yaml"
         "controller-pod-monitoring.yaml"
         "kubelet-extra-monitoring.yaml"
-        "runsc-pod-monitoring.yaml"
     )
     for mf in "${monitoring_files[@]}"; do
         if [[ -f "${shared_dir}/${mf}" ]]; then
@@ -602,7 +604,8 @@ apply_shared() {
                 --role=roles/iam.workloadIdentityUser \
                 --member="serviceAccount:${PROJECT}.svc.id.goog[gmp-public/conntrack-reporter]" \
                 --project="${PROJECT}" --quiet 2>/dev/null || true
-            kubectl apply -f "${shared_dir}/netd-conntrack-monitoring.yaml"
+            sed "s|PROJECT_ID|${PROJECT}|g" "${shared_dir}/netd-conntrack-monitoring.yaml" \
+                | kubectl apply -f -
             ok "Conntrack reporter applied"
         fi
     fi

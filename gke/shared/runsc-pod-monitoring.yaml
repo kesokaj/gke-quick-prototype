@@ -1,26 +1,5 @@
-# =============================================================================
 # gVisor Metrics Reporter — pushes runsc-metric-server data to Cloud Monitoring
-# =============================================================================
-#
-# runsc-metric-server serves per-sandbox Prometheus metrics on localhost:9115
-# but only binds to loopback (not scrapable by GMP externally).
-#
-# This DaemonSet runs a prometheus-to-sd sidecar with hostNetwork: true,
-# so localhost resolves to the same host where runsc-metric-server is listening.
-# It reads metrics and pushes them to Cloud Monitoring as
-# custom.googleapis.com/gke/* metrics.
-#
-# Only runs on gVisor-enabled nodes (nodeSelector).
-#
-# Exported metrics:
-#   custom.googleapis.com/gke/node/meta_sandbox_running
-#   custom.googleapis.com/gke/node/fs_opens
-#   custom.googleapis.com/gke/node/fs_reads
-#   custom.googleapis.com/gke/node/netstack_tcp_current_established
-#   custom.googleapis.com/gke/node/netstack_nic_rx_bytes
-#   custom.googleapis.com/gke/node/netstack_nic_tx_bytes
-#   custom.googleapis.com/gke/node/netstack_dropped_packets
-# =============================================================================
+# via prometheus-to-sd. Runs on gVisor nodes only (hostNetwork: true, port 9115).
 
 apiVersion: apps/v1
 kind: DaemonSet

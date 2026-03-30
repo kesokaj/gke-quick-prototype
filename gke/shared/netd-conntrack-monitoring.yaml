@@ -1,26 +1,6 @@
-# =============================================================================
 # Conntrack Reporter — pushes netd metrics to Cloud Monitoring
-# =============================================================================
-#
-# netd serves conntrack/socket metrics on localhost:10231 but only binds
-# to loopback (not scrapable by GMP externally).
-#
-# This DaemonSet runs a prometheus-to-sd sidecar with hostNetwork: true,
-# so localhost resolves to the same host where netd is listening.
-# It reads metrics from netd and pushes them to Cloud Monitoring as
-# custom.googleapis.com/gke/* metrics.
-#
-# Runs in gmp-public namespace to avoid kube-system Warden restrictions.
-# Uses Workload Identity via the conntrack-reporter KSA bound to the
-# gke-default GSA (roles/owner).
-#
-# Exported metrics:
-#   custom.googleapis.com/gke/node/conntrack_entries
-#   custom.googleapis.com/gke/node/conntrack_error_count
-#   custom.googleapis.com/gke/node/num_inuse_sockets
-#   custom.googleapis.com/gke/node/num_tw_sockets
-#   custom.googleapis.com/gke/node/socket_memory
-# =============================================================================
+# via prometheus-to-sd. Runs on all nodes (hostNetwork: true, port 10231).
+# Uses Workload Identity via conntrack-reporter KSA.
 
 ---
 apiVersion: v1
@@ -29,7 +9,7 @@ metadata:
   name: conntrack-reporter
   namespace: gmp-public
   annotations:
-    iam.gke.io/gcp-service-account: gke-default@lvble-repro-sandbox1.iam.gserviceaccount.com
+    iam.gke.io/gcp-service-account: gke-default@PROJECT_ID.iam.gserviceaccount.com
 
 ---
 apiVersion: apps/v1

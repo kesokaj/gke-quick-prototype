@@ -5,6 +5,7 @@ go 1.24
 require (
 	cloud.google.com/go/compute/metadata v0.6.0
 	cloud.google.com/go/monitoring v1.24.2
+	github.com/gorilla/websocket v1.5.3
 	google.golang.org/genproto/googleapis/api v0.0.0-20250414145226-207652e42e2e
 	google.golang.org/protobuf v1.36.8
 )

@@ -50,6 +50,8 @@ spec:
                 fieldRef:
                   apiVersion: v1
                   fieldPath: metadata.namespace
+            - name: WS_SERVER_URL
+              value: "WS_SERVER_URL_PLACEHOLDER"
 
           livenessProbe:
             failureThreshold: 3

@@ -52,28 +52,21 @@ type PoolSizeRequest struct {
 
 // RegisterRoutes sets up all HTTP routes.
 func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
-	// Status & listing.
 	mux.HandleFunc("GET /api/status", h.handleStatus)
 	mux.HandleFunc("GET /api/sandboxes", h.handleListSandboxes)
-	mux.HandleFunc("GET /api/sandboxes/", h.handleSandboxGet) // detail, logs, events
+	mux.HandleFunc("GET /api/sandboxes/", h.handleSandboxGet)
 
-	// Pool management.
 	mux.HandleFunc("PUT /api/pool-size", h.handleSetPoolSize)
 
-	// Sandbox lifecycle.
 	mux.HandleFunc("POST /api/provision", h.handleProvision)
-	mux.HandleFunc("POST /api/sandboxes/", h.handleSandboxAction) // actions
+	mux.HandleFunc("POST /api/sandboxes/", h.handleSandboxAction)
 	mux.HandleFunc("DELETE /api/sandboxes/", h.handleDeleteSandbox)
 
-	// Metrics summary (for UI).
 	mux.HandleFunc("GET /api/metrics/summary", h.handleMetricsSummary)
 	mux.HandleFunc("POST /api/metrics/reset", h.handleMetricsReset)
 
-	// Health.
 	mux.HandleFunc("GET /healthz", h.handleHealthz)
 }
-
-// ---------- Status + Listing ----------
 
 func (h *Handlers) handleStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, h.store.Status())
@@ -83,8 +76,6 @@ func (h *Handlers) handleListSandboxes(w http.ResponseWriter, r *http.Request) {
 	sandboxes := h.store.List()
 	writeJSON(w, http.StatusOK, sandboxes)
 }
-
-// ---------- Pool Management ----------
 
 func (h *Handlers) handleSetPoolSize(w http.ResponseWriter, r *http.Request) {
 	var req PoolSizeRequest
@@ -98,7 +89,7 @@ func (h *Handlers) handleSetPoolSize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Patch Deployment replicas directly — K8s is the source of truth.
+	// Patch Deployment replicas — K8s is the source of truth.
 	patch := fmt.Sprintf(`{"spec":{"replicas":%d}}`, req.Size)
 	_, err := h.client.AppsV1().Deployments(h.namespace).Patch(
 		r.Context(), h.deployName, types.MergePatchType, []byte(patch), metav1.PatchOptions{},
@@ -119,12 +110,9 @@ func (h *Handlers) handleSetPoolSize(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// ---------- Provision ----------
-
 func (h *Handlers) handleProvision(w http.ResponseWriter, r *http.Request) {
 	var req ProvisionRequest
 
-	// Parse optional JSON body.
 	if r.Body != nil && r.ContentLength > 0 {
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON: " + err.Error()})
@@ -132,12 +120,10 @@ func (h *Handlers) handleProvision(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Default: 5 minute lifetime. The controller owns the lifecycle.
 	if req.Lifetime == "" {
 		req.Lifetime = "5m"
 	}
 
-	// Parse expiry.
 	var expiresAt *time.Time
 	if req.Lifetime != "unlimited" {
 		t, err := parseExpiry(req.Lifetime)
@@ -145,7 +131,6 @@ func (h *Handlers) handleProvision(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid lifetime: " + err.Error()})
 			return
 		}
-		// Cap at 2 hours max.
 		maxExpiry := time.Now().Add(2 * time.Hour)
 		if t.After(maxExpiry) {
 			t = maxExpiry
@@ -162,9 +147,8 @@ func (h *Handlers) handleProvision(w http.ResponseWriter, r *http.Request) {
 	slog.Info("provisioning sandbox", "name", sb.Name, "lifetime", req.Lifetime)
 	claimStart := time.Now()
 
-	// Detach pod from Deployment by changing warmpool=false.
-	// This orphans the pod — K8s does NOT terminate orphans.
-	// The Deployment sees fewer matching pods and auto-creates a replacement.
+	// Detach from Deployment: warmpool=false orphans the pod and
+	// K8s auto-creates a replacement.
 	claimedAt := time.Now().Format(time.RFC3339)
 	patch := fmt.Sprintf(`{"metadata":{"labels":{"warmpool":"false"},"annotations":{"sandbox.gvisor/state":"claimed","sandbox.gvisor/claimed-at":"%s"}}}`, claimedAt)
 	_, err := h.client.CoreV1().Pods(h.namespace).Patch(
@@ -172,14 +156,13 @@ func (h *Handlers) handleProvision(w http.ResponseWriter, r *http.Request) {
 	)
 	if err != nil {
 		slog.Error("failed to detach pod", "name", sb.Name, "error", err)
-		// Rollback: restore to idle so it can be claimed again.
+		// Rollback to idle so it can be claimed again.
 		sb.State = "idle"
 		h.store.Upsert(sb)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to claim: " + err.Error()})
 		return
 	}
 
-	// Update state.
 	now := time.Now()
 	sb.DetachedAt = &now
 	sb.ExpiresAt = expiresAt
@@ -187,8 +170,6 @@ func (h *Handlers) handleProvision(w http.ResponseWriter, r *http.Request) {
 		Lifetime: req.Lifetime,
 	}
 
-	// Record claim-to-ready metric: time from claim start to successful patch.
-	// For warm-pool pods this captures the actual end-to-end claim latency.
 	claimDuration := time.Since(claimStart).Seconds()
 	sandboxClaimToReady.Observe(claimDuration)
 	sb.ReadyObserved = true
@@ -196,7 +177,6 @@ func (h *Handlers) handleProvision(w http.ResponseWriter, r *http.Request) {
 
 	h.store.Upsert(sb)
 
-	// Kick the reconciler to sync immediately (non-blocking).
 	select {
 	case h.kickCh <- struct{}{}:
 	default:
@@ -211,8 +191,6 @@ func (h *Handlers) handleProvision(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// ---------- Sandbox Actions (restart) ----------
-
 // ---------- GET /api/sandboxes/{name}[/logs|/events] ----------
 
 func (h *Handlers) handleSandboxGet(w http.ResponseWriter, r *http.Request) {
@@ -222,7 +200,7 @@ func (h *Handlers) handleSandboxGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check for sub-resource: /api/sandboxes/{name}/logs|events|terminal
+	// Sub-resource: /api/sandboxes/{name}/logs|events|terminal|status
 	lastPart := parts[len(parts)-1]
 	switch lastPart {
 	case "logs":
@@ -234,8 +212,10 @@ func (h *Handlers) handleSandboxGet(w http.ResponseWriter, r *http.Request) {
 	case "terminal":
 		name := parts[len(parts)-2]
 		h.handleTerminal(w, r, name)
+	case "status":
+		name := parts[len(parts)-2]
+		h.handleSandboxStatus(w, r, name)
 	default:
-		// Direct sandbox lookup: /api/sandboxes/{name}
 		name := lastPart
 		sb, ok := h.store.Get(name)
 		if !ok {
@@ -244,6 +224,33 @@ func (h *Handlers) handleSandboxGet(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusOK, sb)
 	}
+}
+
+// handleSandboxStatus proxies the /_sandbox/status endpoint from the pod.
+func (h *Handlers) handleSandboxStatus(w http.ResponseWriter, r *http.Request, name string) {
+	sb, ok := h.store.Get(name)
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "sandbox not found"})
+		return
+	}
+	if sb.PodIP == "" {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "pod IP not available"})
+		return
+	}
+
+	statusURL := fmt.Sprintf("http://%s:3004/_sandbox/status", sb.PodIP)
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Get(statusURL)
+	if err != nil {
+		slog.Warn("failed to proxy sandbox status", "name", name, "error", err)
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "failed to reach sandbox: " + err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
 }
 
 // ---------- POST /api/sandboxes/{name}/{action} ----------
@@ -266,7 +273,7 @@ func (h *Handlers) handleSandboxAction(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) handleRestart(w http.ResponseWriter, r *http.Request, name string) {
-	sb, ok := h.store.Get(name)
+	_, ok := h.store.Get(name)
 	if !ok {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "sandbox not found"})
 		return
@@ -274,7 +281,7 @@ func (h *Handlers) handleRestart(w http.ResponseWriter, r *http.Request, name st
 
 	slog.Info("restarting sandbox", "name", name)
 
-	// Delete the pod — the Deployment controller will recreate it.
+	// Delete the pod — Deployment controller recreates it.
 	grace := int64(0)
 	err := h.client.CoreV1().Pods(h.namespace).Delete(
 		r.Context(), name, metav1.DeleteOptions{GracePeriodSeconds: &grace},
@@ -286,15 +293,12 @@ func (h *Handlers) handleRestart(w http.ResponseWriter, r *http.Request, name st
 	}
 
 	h.store.Remove(name)
-	_ = sb // silences unused warning
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"restarted": true,
 		"name":      name,
 	})
 }
-
-// ---------- Delete ----------
 
 func (h *Handlers) handleDeleteSandbox(w http.ResponseWriter, r *http.Request) {
 	name := extractName(r.URL.Path)
@@ -319,13 +323,9 @@ func (h *Handlers) handleDeleteSandbox(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"deleted": true})
 }
 
-// ---------- Health ----------
-
 func (h *Handlers) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
-
-// ---------- Metrics Summary (for UI) ----------
 
 func (h *Handlers) handleMetricsSummary(w http.ResponseWriter, r *http.Request) {
 	schedule := extractHistogramSummary(sandboxScheduleDuration)
@@ -343,8 +343,6 @@ func (h *Handlers) handleMetricsReset(w http.ResponseWriter, r *http.Request) {
 	slog.Info("metrics reset by user")
 	writeJSON(w, http.StatusOK, map[string]string{"status": "reset"})
 }
-
-// ---------- Logs ----------
 
 func (h *Handlers) handleLogs(w http.ResponseWriter, r *http.Request, name string) {
 	_, ok := h.store.Get(name)
@@ -375,8 +373,6 @@ func (h *Handlers) handleLogs(w http.ResponseWriter, r *http.Request, name strin
 
 	writeJSON(w, http.StatusOK, map[string]string{"name": name, "logs": string(logs)})
 }
-
-// ---------- Events ----------
 
 func (h *Handlers) handleEvents(w http.ResponseWriter, r *http.Request, name string) {
 	_, ok := h.store.Get(name)
@@ -416,11 +412,8 @@ func (h *Handlers) handleEvents(w http.ResponseWriter, r *http.Request, name str
 	writeJSON(w, http.StatusOK, map[string]interface{}{"name": name, "events": result})
 }
 
-// ---------- Helpers ----------
-
 // parseExpiry parses a lifetime string: duration ("1h", "30m") or date ("2025-12-31").
 func parseExpiry(lifetime string) (time.Time, error) {
-	// Try as date first (YYYY-MM-DD).
 	if len(lifetime) == 10 && lifetime[4] == '-' && lifetime[7] == '-' {
 		t, err := time.Parse("2006-01-02", lifetime)
 		if err == nil {
@@ -428,7 +421,6 @@ func parseExpiry(lifetime string) (time.Time, error) {
 		}
 	}
 
-	// Try as Go duration.
 	d, err := time.ParseDuration(lifetime)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("use duration (1h, 30m) or date (2025-12-31): %w", err)

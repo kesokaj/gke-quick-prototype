@@ -1,11 +1,7 @@
-# ═══════════════════════════════════════════════════════════════════════════════
-# Cilium Emergency Override — Production Config
-# ═══════════════════════════════════════════════════════════════════════════════
+# Cilium Emergency Override — DPv2 Scale-Optimized Tuning
 #
-# Applied as: cilium-config-emergency-override ConfigMap (kube-system)
-# Method:     kubectl patch with field-manager (see cluster.sh apply_shared)
-#
-# ═══════════════════════════════════════════════════════════════════════════════
+# Applied as cilium-config-emergency-override ConfigMap (kube-system).
+# See cluster.sh apply_shared for the patching method.
 
 apiVersion: v1
 kind: ConfigMap
@@ -13,45 +9,16 @@ metadata:
   name: cilium-config-emergency-override
   namespace: kube-system
 data:
-  # ┌──────────────────────────────────────────────────────────────────────────┐
-  # │  OBSERVABILITY                                                          │
-  # └──────────────────────────────────────────────────────────────────────────┘
-
-  # Monitor aggregation controls the granularity of BPF tracing events.
-  # "maximum" with 60s interval is the most impactful tuning to reduce
-  # cilium-agent CPU when processing high traffic volumes.
-  #
-  # Default: medium (5s interval)
+  # Monitor aggregation: "maximum" + 60s reduces cilium-agent CPU under high traffic.
   monitor-aggregation: "maximum"
   monitor-aggregation-interval: "60s"
 
-  # ┌──────────────────────────────────────────────────────────────────────────┐
-  # │  API SERVER LOAD                                                        │
-  # └──────────────────────────────────────────────────────────────────────────┘
-
-  # K8s client QPS and burst control the agent's request rate to the API server.
-  # 5× upstream default. GKE API server self-protects with 429s via APF.
-  #
-  # Default: k8s-client-qps=10, k8s-client-burst=20
+  # K8s client QPS/burst: 5× upstream default. API server self-protects via APF.
   k8s-client-qps: "50"
   k8s-client-burst: "100"
 
-  # ┌──────────────────────────────────────────────────────────────────────────┐
-  # │  AGENT ENDPOINT RATE LIMITS (Static)                                    │
-  # └──────────────────────────────────────────────────────────────────────────┘
-
-  # Static rate limits for endpoint create/delete operations.
-  # 100/s with burst 300, 16 parallel requests, auto-adjust disabled.
-  #
-  # Default: rate-limit:0.5/s, burst:4, parallel:4, auto-adjust:true
+  # Endpoint rate limits: 100/s burst 300, 16 parallel, auto-adjust disabled.
   api-rate-limit: '{"endpoint-create": "rate-limit:100/s,rate-burst:300,parallel-requests:16,max-wait-duration:60s,auto-adjust:false", "endpoint-delete": "rate-limit:100/s,rate-burst:300,parallel-requests:16,max-wait-duration:60s,auto-adjust:false"}'
 
-  # ┌──────────────────────────────────────────────────────────────────────────┐
-  # │  eBPF MAP CAPACITY                                                      │
-  # └──────────────────────────────────────────────────────────────────────────┘
-
-  # Dynamic size ratio: percentage of system memory allocated to eBPF maps.
-  # Doubled from 0.25% → 0.5% to prevent map-resize stalls during surges.
-  #
-  # Default: 0.0025 (0.25% of system memory)
+  # eBPF map size: doubled from 0.25% → 0.5% of system memory to prevent map-resize stalls.
   bpf-map-dynamic-size-ratio: "0.005"

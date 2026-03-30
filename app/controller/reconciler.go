@@ -62,7 +62,6 @@ func (r *Reconciler) Run(ctx context.Context) {
 		case <-ticker.C:
 			r.sync(ctx)
 		case <-r.kickCh:
-			// Drain any extra kicks that piled up.
 			for len(r.kickCh) > 0 {
 				<-r.kickCh
 			}
@@ -75,7 +74,7 @@ func (r *Reconciler) Run(ctx context.Context) {
 func (r *Reconciler) sync(ctx context.Context) {
 	syncStart := time.Now()
 	defer func() {
-		slog.Info("sync completed", "duration_ms", time.Since(syncStart).Milliseconds())
+		slog.Debug("sync completed", "duration_ms", time.Since(syncStart).Milliseconds())
 	}()
 
 	pods, err := r.client.CoreV1().Pods(r.namespace).List(ctx, metav1.ListOptions{
@@ -86,13 +85,12 @@ func (r *Reconciler) sync(ctx context.Context) {
 		return
 	}
 
-	// Read current Deployment replicas as pool size (source of truth).
+	// Deployment replicas is the source of truth for pool size.
 	deploy, err := r.client.AppsV1().Deployments(r.namespace).Get(ctx, r.deployName, metav1.GetOptions{})
 	if err == nil && deploy.Spec.Replicas != nil {
 		r.store.SetPoolSize(int(*deploy.Spec.Replicas))
 	}
 
-	// Fetch pod metrics (best-effort).
 	metricsMap := r.fetchMetrics(ctx)
 
 	liveNames := make(map[string]bool, len(pods.Items))
@@ -100,26 +98,21 @@ func (r *Reconciler) sync(ctx context.Context) {
 	for i := range pods.Items {
 		pod := &pods.Items[i]
 
-		// Skip pods that are being terminated (in grace period).
 		if pod.DeletionTimestamp != nil {
 			continue
 		}
 
 		liveNames[pod.Name] = true
 
-		// State from warmpool label: "true" = in pool, "false" = claimed (orphaned).
 		state := "idle"
 		if pod.Labels["warmpool"] == "false" {
 			state = "active"
 		}
 
-		// Only truly idle when the pod is actually Running.
-		// Pending/ContainerCreating pods are not claimable yet.
 		if state == "idle" && pod.Status.Phase != corev1.PodRunning {
 			state = "pending"
 		}
 
-		// Check for failed pods.
 		if pod.Status.Phase == "Failed" || pod.Status.Phase == "Unknown" {
 			state = "failed"
 		}
@@ -135,10 +128,7 @@ func (r *Reconciler) sync(ctx context.Context) {
 			}
 		}
 
-		// Preserve existing provision config and state.
 		existing, exists := r.store.Get(pod.Name)
-
-		// Use pod readiness condition as "ready" signal.
 		podReady := isPodReady(pod)
 
 		sb := &Sandbox{
@@ -152,12 +142,10 @@ func (r *Reconciler) sync(ctx context.Context) {
 			ImageTag:  extractImageTag(pod),
 		}
 
-		// Apply metrics if available.
 		if m, ok := metricsMap[pod.Name]; ok {
 			sb.Metrics = m
 		}
 
-		// Carry over provision config and metric flags from existing state.
 		if exists {
 			sb.Config = existing.Config
 			sb.DetachedAt = existing.DetachedAt
@@ -166,10 +154,9 @@ func (r *Reconciler) sync(ctx context.Context) {
 			sb.ReadyObserved = existing.ReadyObserved
 		}
 
-		// Detect detach time if transitioning to active.
+		// Detect detach time for newly-active pods.
 		if state == "active" && !exists {
-			// Controller restart: pod was already claimed before this controller started.
-			// Use the claimed-at annotation for accurate timing, not time.Now().
+			// Use claimed-at annotation for accurate timing after controller restart.
 			if claimedAt, ok := pod.Annotations["sandbox.gvisor/claimed-at"]; ok {
 				if t, err := time.Parse(time.RFC3339, claimedAt); err == nil {
 					sb.DetachedAt = &t
@@ -179,8 +166,6 @@ func (r *Reconciler) sync(ctx context.Context) {
 				now := time.Now()
 				sb.DetachedAt = &now
 			}
-			// Pre-existing claimed pods: mark as observed to avoid stale measurements.
-			// The real claim-to-ready was lost when the controller restarted.
 			sb.ReadyObserved = true
 		}
 		if state == "active" && exists && existing.State == "idle" {
@@ -188,8 +173,7 @@ func (r *Reconciler) sync(ctx context.Context) {
 			sb.DetachedAt = &now
 		}
 
-		// --- Metrics: schedule duration ---
-		// When a pod first becomes Ready, record how long it took from creation.
+		// Record schedule duration when a pod first becomes Ready.
 		if state == "idle" && podReady && !sb.ScheduleObserved {
 			duration := podReadyDuration(pod)
 			sandboxScheduleDuration.Observe(duration)
@@ -200,22 +184,13 @@ func (r *Reconciler) sync(ctx context.Context) {
 		r.store.Upsert(sb)
 	}
 
-	// Prune pods that no longer exist.
 	r.store.Prune(liveNames)
-
-	// --- Metrics: gauge updates ---
 	r.updateGauges()
-
-	// Reap expired pods.
 	r.gc(ctx)
-
-	// Clean up completed/succeeded pods (e.g. bench-curl-* from benchmarks).
 	r.gcCompletedPods(ctx)
 
-	// NOTE: No ensurePoolSize() here.
-	// The Deployment controller handles replica count natively.
-	// When a pod is detached (warmpool=false), it falls out of the
-	// Deployment selector and Kubernetes creates a replacement.
+	// No ensurePoolSize() needed: the Deployment controller handles replica
+	// replacement natively when a pod is detached (warmpool=false).
 }
 
 // fetchMetrics retrieves CPU/memory for all pods via k8s Metrics API.
@@ -256,25 +231,21 @@ func (r *Reconciler) fetchMetrics(ctx context.Context) map[string]*PodMetrics {
 // full lifecycle: TTL expiry, failed/crashed/OOM pods, and stale unlimited pods.
 func (r *Reconciler) gc(ctx context.Context) {
 	now := time.Now()
-	const maxUnlimitedLifetime = 24 * time.Hour // safety net for unlimited pods
+	const maxUnlimitedLifetime = 24 * time.Hour
 
 	for _, sb := range r.store.List() {
 		var reason string
 
 		switch {
-		// TTL expired.
 		case sb.State == "active" && sb.ExpiresAt != nil && now.After(*sb.ExpiresAt):
 			reason = "ttl_expired"
 
-		// Failed pods (K8s phase Failed/Unknown).
 		case sb.State == "failed":
 			reason = "failed"
 
-		// Active pods that stopped running (container exited/crashed).
 		case sb.State == "active" && sb.Phase != "Running" && sb.Phase != "Pending":
 			reason = "exited"
 
-		// Stale unlimited active pods (safety net — no pod should live forever).
 		case sb.State == "active" && sb.ExpiresAt == nil && sb.DetachedAt != nil && now.Sub(*sb.DetachedAt) > maxUnlimitedLifetime:
 			reason = "stale"
 
@@ -311,7 +282,6 @@ func (r *Reconciler) gcCompletedPods(ctx context.Context) {
 
 		for i := range pods.Items {
 			pod := &pods.Items[i]
-			// Only clean pods older than 2 minutes (let them be inspectable briefly).
 			if time.Since(pod.CreationTimestamp.Time) < 2*time.Minute {
 				continue
 			}
@@ -368,6 +338,5 @@ func podReadyDuration(pod *corev1.Pod) float64 {
 			}
 		}
 	}
-	// Fallback: use current time.
 	return time.Since(pod.CreationTimestamp.Time).Seconds()
 }

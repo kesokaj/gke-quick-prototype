@@ -92,3 +92,28 @@ The claim-to-ready metric was measured in the reconciler sync loop by recording 
 - Controller restarts do not pollute the metric
 - Reset Metrics only resets observations for idle/pending pods, not active ones
 
+## ADR-005: WebSocket Session Simulation via Cloud Run
+
+**Date:** 2026-03-30
+**Status:** Accepted
+
+### Context
+
+Sandbox pods simulate developer workloads (CPU cycles, disk I/O, network downloads) but lacked a persistent connection component. Real developer sessions maintain long-lived connections (WebSocket terminals, LSP, file sync). We needed a way to simulate this and monitor connection health.
+
+### Decision
+
+- **Cloud Run WS server** (`ws-server`) handles WebSocket connections, responds to `ping` with `pong`, and tracks active connection counts. Deployed to the same region (`europe-west4`) as the GKE cluster.
+- **Authenticated access** — Org policy prohibits `allUsers`. Sandbox pods authenticate via Workload Identity: fetch an ID token from the GCE metadata server (`169.254.169.254`) and send it as a Bearer token in the WebSocket handshake.
+- **NetworkPolicy exception** — A targeted egress rule allows `169.254.169.254/32:80` for metadata token fetch while maintaining full sandbox isolation otherwise.
+- **Metadata IP direct** — Sandbox pods use `dnsPolicy: None` with public nameservers, so `metadata.google.internal` can't resolve. The metadata IP (`169.254.169.254`) is used directly.
+- **Auto-reconnect** — If the WS connection drops (Cloud Run 60-min timeout, network issues), the client reconnects after 2 seconds with a fresh ID token.
+- **Periodic logging** — Logs the first ping/pong exchange and then every 30 pings (~60s) with cumulative counters, plus detailed disconnect reasons with connection lifetime.
+
+### Consequences
+
+- Each claimed sandbox maintains exactly one WebSocket connection to Cloud Run
+- Connection health visible via `/_sandbox/status` (wsConnected field), proxied through controller API and shown in the UI
+- Cloud Run auto-scales from 0 (no cost when no sandboxes are claimed)
+- WS server is fully managed — no infrastructure to maintain beyond the deploy script
+- Deploy script handles build, push, Cloud Run deployment, and IAM binding automatically

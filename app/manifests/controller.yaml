@@ -1,12 +1,10 @@
 ---
-# ServiceAccount
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: sandbox-controller
   namespace: sandbox-control
 ---
-# ClusterRole — broad permissions for testing
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -34,7 +32,6 @@ rules:
     resources: [pods]
     verbs: [list]
 ---
-# ClusterRoleBinding
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
@@ -48,7 +45,6 @@ roleRef:
   name: sandbox-controller
   apiGroup: rbac.authorization.k8s.io
 ---
-# Deployment
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -57,7 +53,7 @@ metadata:
   labels:
     app: sandbox-controller
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: sandbox-controller
@@ -92,14 +88,13 @@ spec:
             periodSeconds: 5
           resources:
             requests:
-              cpu: 50m
+              cpu: 500m
               memory: 512Mi
             limits:
-              cpu: 500m
+              cpu: "1"
               memory: 1Gi
       terminationGracePeriodSeconds: 10
 ---
-# Service
 apiVersion: v1
 kind: Service
 metadata:

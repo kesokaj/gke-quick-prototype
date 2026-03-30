@@ -35,9 +35,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 # Source .env if available
-if [[ -f "${REPO_DIR}/app/.env" ]]; then
+if [[ -f "${REPO_DIR}/.env" ]]; then
     set -a
-    source "${REPO_DIR}/app/.env"
+    source "${REPO_DIR}/.env"
     set +a
 fi
 

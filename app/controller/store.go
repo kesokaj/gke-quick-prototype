@@ -96,8 +96,6 @@ func (s *Store) ResetObservations() {
 	defer s.mu.Unlock()
 	for _, sb := range s.sandboxes {
 		sb.ScheduleObserved = false
-		// Only reset claim-to-ready for idle pods. Re-measuring active pods
-		// would produce false durations since DetachedAt is in the past.
 		if sb.State == "idle" || sb.State == "pending" {
 			sb.ReadyObserved = false
 		}

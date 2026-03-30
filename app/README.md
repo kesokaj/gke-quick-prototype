@@ -57,9 +57,9 @@ Manages a warm pool of sandbox pods via a K8s Deployment. Pods sit idle until cl
 Runs inside gVisor-sandboxed pods. Simulates realistic user workloads:
 
 1. **Phase 1 — Download:** Fetches 5 × 1 MB from external speedtest servers
-2. **Phase 2 — Disk:** Writes 10–200 MB to ephemeral storage
-3. **Phase 3 — CPU:** Random load bursts (light/medium/heavy/peak) for 3–30 min
-4. **Lifecycle:** Reports metrics to Cloud Monitoring, simulates 5% crash rate
+2. **Phase 2 — Disk:** Writes 500 MB–3 GB random data to ephemeral storage
+3. **Phase 3 — CPU:** Duty-cycled load bursts (90% light/8% medium/2% heavy) until SIGTERM
+4. **Background:** WebSocket session to Cloud Run (ping/pong every 2s), network probe to 8.8.8.8
 
 ### Network Isolation
 

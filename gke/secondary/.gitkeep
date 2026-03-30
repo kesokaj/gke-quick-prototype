@@ -1,0 +1,2 @@
+# Placeholder: secondary pool-specific YAML applied by `cluster.sh apply`.
+# Add files here when secondary pool custom configs are needed.

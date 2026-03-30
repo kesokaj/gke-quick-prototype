@@ -2,51 +2,44 @@ package main
 
 import (
 	"math"
-	"sort"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	dto "github.com/prometheus/client_model/go"
 )
 
-// Histogram buckets tuned for sub-second to ~60s container scheduling.
 var schedulingBuckets = []float64{0.1, 0.25, 0.5, 1, 2.5, 5, 10, 15, 30, 60}
 
 var (
-	// sandboxScheduleDuration measures time from pod creation to Running.
 	sandboxScheduleDuration = promauto.NewHistogram(prometheus.HistogramOpts{
 		Name:    "sandbox_schedule_duration_seconds",
 		Help:    "Time from pod creation to Running state (includes scheduling + gVisor boot).",
 		Buckets: schedulingBuckets,
 	})
 
-	// sandboxClaimToReady measures time from claim (detach) to Ready=true.
 	sandboxClaimToReady = promauto.NewHistogram(prometheus.HistogramOpts{
 		Name:    "sandbox_claim_to_ready_seconds",
 		Help:    "Time from sandbox claim to readiness probe passing.",
 		Buckets: schedulingBuckets,
 	})
 
-	// sandboxPoolSize tracks the configured pool size target.
 	sandboxPoolSize = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "sandbox_pool_size",
 		Help: "Configured warm pool size target.",
 	})
 
-	// sandboxStateCount tracks the number of sandboxes per state.
 	sandboxStateCount = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "sandbox_state_count",
 		Help: "Number of sandboxes by state.",
 	}, []string{"state"})
 
-	// sandboxGCTotal counts pods garbage collected by the controller, by reason.
 	sandboxGCTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "sandbox_gc_total",
 		Help: "Total sandbox pods garbage collected by the controller.",
 	}, []string{"reason"})
 )
 
-// resetMetrics unregisters and re-registers the histogram metrics, effectively zeroing them.
+// resetMetrics re-registers histogram metrics, effectively zeroing them.
 func resetMetrics() {
 	prometheus.Unregister(sandboxScheduleDuration)
 	sandboxScheduleDuration = promauto.NewHistogram(prometheus.HistogramOpts{
@@ -117,23 +110,16 @@ func histogramQuantile(q float64, hist *dto.Histogram) float64 {
 
 	rank := q * count
 
-	// Sort buckets by upper bound.
-	sort.Slice(buckets, func(i, j int) bool {
-		return buckets[i].GetUpperBound() < buckets[j].GetUpperBound()
-	})
 
-	// Linear interpolation between bucket boundaries (Prometheus method).
 	var prevCount float64
 	var prevBound float64
 	for _, b := range buckets {
 		cumCount := float64(b.GetCumulativeCount())
 		if cumCount >= rank {
-			// Interpolate within this bucket.
 			bucketCount := cumCount - prevCount
 			if bucketCount == 0 {
 				return math.Round(b.GetUpperBound()*1000) / 1000
 			}
-			// How far into this bucket the rank falls (0.0 to 1.0).
 			fraction := (rank - prevCount) / bucketCount
 			interpolated := prevBound + fraction*(b.GetUpperBound()-prevBound)
 			return math.Round(interpolated*100) / 100

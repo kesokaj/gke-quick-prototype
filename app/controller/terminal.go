@@ -23,7 +23,6 @@ var upgrader = websocket.Upgrader{
 // stdin/stdout/stderr to a bash shell inside the sandbox pod.
 // Works on both idle (warmpool) and claimed (active) pods.
 func (h *Handlers) handleTerminal(w http.ResponseWriter, r *http.Request, name string) {
-	// Verify pod exists in our store.
 	_, ok := h.store.Get(name)
 	if !ok {
 		http.Error(w, "sandbox not found", http.StatusNotFound)
@@ -42,7 +41,6 @@ func (h *Handlers) handleTerminal(w http.ResponseWriter, r *http.Request, name s
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Minute)
 	defer cancel()
 
-	// Build the exec request.
 	req := h.client.CoreV1().RESTClient().Post().
 		Resource("pods").
 		Name(name).
@@ -63,10 +61,8 @@ func (h *Handlers) handleTerminal(w http.ResponseWriter, r *http.Request, name s
 		return
 	}
 
-	// Create the bidirectional stream adapter.
 	stream := &wsStream{conn: conn, done: make(chan struct{})}
 
-	// Run the exec stream — this blocks until the session ends.
 	err = exec.StreamWithContext(ctx, remotecommand.StreamOptions{
 		Stdin:  stream,
 		Stdout: stream,
@@ -92,7 +88,6 @@ type wsStream struct {
 
 // Read reads from the WebSocket connection.
 func (s *wsStream) Read(p []byte) (int, error) {
-	// Drain leftover buffer first.
 	if len(s.readBuf) > 0 {
 		n := copy(p, s.readBuf)
 		s.readBuf = s.readBuf[n:]
@@ -104,9 +99,7 @@ func (s *wsStream) Read(p []byte) (int, error) {
 		return 0, err
 	}
 
-	// Handle resize messages: JSON starting with {"type":"resize"
 	if len(msg) > 0 && msg[0] == '{' {
-		// Ignore resize for now — we don't have a TerminalSize queue.
 		return 0, nil
 	}
 

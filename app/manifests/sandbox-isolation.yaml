@@ -1,17 +1,6 @@
-# =============================================================================
 # Sandbox Network Isolation
-# =============================================================================
-#
-# Egress:  sandbox pods can ONLY reach the public internet.
-#          All RFC1918, link-local, loopback, and CGNAT blocked.
-#          No in-cluster traffic whatsoever.
-#          Pods use dnsPolicy: None with public nameservers
-#          (8.8.8.8 / 1.1.1.1), so kube-dns access is not needed.
-#
-# Ingress: only the sandbox-control namespace (controller)
-#          can reach sandbox pods on port 3004.
-#
-# =============================================================================
+# Egress: public internet only (RFC1918/loopback/CGNAT blocked, GCE metadata allowed).
+# Ingress: sandbox-control namespace on port 3004 only.
 
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -24,6 +13,14 @@ spec:
     - Ingress
     - Egress
   egress:
+    # Rule 1: Allow GCE metadata server (Workload Identity token fetch)
+    - to:
+        - ipBlock:
+            cidr: 169.254.169.254/32
+      ports:
+        - port: 80
+          protocol: TCP
+    # Rule 2: Allow public internet (everything except internal ranges)
     - to:
         - ipBlock:
             cidr: 0.0.0.0/0
@@ -32,7 +29,7 @@ spec:
               - 172.16.0.0/12    # RFC1918
               - 192.168.0.0/16   # RFC1918
               - 127.0.0.0/8      # Loopback
-              - 169.254.0.0/16   # Link-local (metadata server)
+              - 169.254.0.0/16   # Link-local (metadata server allowed above)
               - 100.64.0.0/10    # CGNAT / GKE alias ranges
         - ipBlock:
             cidr: ::/0
@@ -48,3 +45,4 @@ spec:
       ports:
         - port: 3004
           protocol: TCP
+

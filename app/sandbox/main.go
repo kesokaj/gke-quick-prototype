@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -19,9 +18,40 @@ import (
 	"time"
 )
 
-// ---------------------------------------------------------------------------
-// Download configuration
-// ---------------------------------------------------------------------------
+// Global sandbox state (exposed via /_sandbox/status)
+
+var sandboxState struct {
+	mu          sync.RWMutex
+	Phase       string  `json:"phase"`       // idle, download, disk, load
+	CPUTier     string  `json:"cpuTier"`     // light, medium, heavy (set during load phase)
+	DutyPct     float64 `json:"dutyPct"`     // duty cycle percentage (0.3 = 300m)
+	WSConnected bool    `json:"wsConnected"` // true if WebSocket session is active
+}
+
+func setPhase(phase string) {
+	sandboxState.mu.Lock()
+	sandboxState.Phase = phase
+	sandboxState.mu.Unlock()
+}
+
+func setTier(tier string, duty float64) {
+	sandboxState.mu.Lock()
+	sandboxState.CPUTier = tier
+	sandboxState.DutyPct = duty
+	sandboxState.mu.Unlock()
+}
+
+func setWSConnected(connected bool) {
+	sandboxState.mu.Lock()
+	sandboxState.WSConnected = connected
+	sandboxState.mu.Unlock()
+}
+
+func getState() (phase, tier string, duty float64, wsConn bool) {
+	sandboxState.mu.RLock()
+	defer sandboxState.mu.RUnlock()
+	return sandboxState.Phase, sandboxState.CPUTier, sandboxState.DutyPct, sandboxState.WSConnected
+}
 
 const downloadTimeout = 30 * time.Second
 
@@ -34,11 +64,6 @@ var downloadFile1MB = downloadFile{"http://speedtest.tele2.net/1MB.zip", 1 * 102
 
 const downloadCount = 5 // 5 × 1MB = 5MB total per sandbox (Cloud NAT cost control)
 
-
-
-// ---------------------------------------------------------------------------
-// Structured logging
-// ---------------------------------------------------------------------------
 
 func logEvent(phase, msg string, fields map[string]interface{}) {
 	entry := map[string]interface{}{
@@ -54,11 +79,8 @@ func logEvent(phase, msg string, fields map[string]interface{}) {
 	fmt.Fprintln(os.Stdout, string(data))
 }
 
-// ---------------------------------------------------------------------------
-// Phase 1: Download 5 × 1MB files (fixed — keeps Cloud NAT egress low)
-// ---------------------------------------------------------------------------
-
 func phaseDownload(ctx context.Context) {
+	setPhase("download")
 	logEvent("download", "starting downloads", map[string]interface{}{
 		"file_count": downloadCount,
 		"file_size":  "1MB",
@@ -102,7 +124,6 @@ func phaseDownload(ctx context.Context) {
 				"elapsed": elapsed.String(),
 				"index":   fmt.Sprintf("%d/%d", i+1, downloadCount),
 			})
-			// Skip to next file — no GCS fallback for 1MB files (not worth the complexity)
 		} else {
 			totalDownloaded += downloadFile1MB.Size
 			mbps := float64(downloadFile1MB.Size) / elapsed.Seconds() / (1024 * 1024)
@@ -148,37 +169,35 @@ func downloadToFile(ctx context.Context, url, destPath string) error {
 	return err
 }
 
-
-
-// ---------------------------------------------------------------------------
-// Phase 3: Random load generation (CPU, disk, network)
-// ---------------------------------------------------------------------------
-
 func phaseLoadLoop(ctx context.Context) {
 	totalCores := runtime.NumCPU()
 
 	roll := mathrand.Intn(100)
 	var tier string
 	var maxCores int
+	var dutyCycle float64
 
 	switch {
-	case roll < 70:
-		tier = "light"
-		maxCores = 1 + mathrand.Intn(2)
 	case roll < 90:
+		tier = "light"
+		maxCores = 1
+		dutyCycle = 0.3
+	case roll < 98:
 		tier = "medium"
-		maxCores = 3 + mathrand.Intn(2)
+		maxCores = 1
+		dutyCycle = 1.0
 	default:
 		tier = "heavy"
 		maxCores = totalCores
-	}
-	if maxCores > totalCores {
-		maxCores = totalCores
+		dutyCycle = 1.0
 	}
 
+	setPhase("load")
+	setTier(tier, dutyCycle)
 	logEvent("load", "starting CPU load", map[string]interface{}{
 		"tier":       tier,
 		"max_cores":  maxCores,
+		"duty_cycle": dutyCycle,
 		"total_cpus": totalCores,
 	})
 
@@ -190,35 +209,30 @@ func phaseLoadLoop(ctx context.Context) {
 		default:
 		}
 
-		stateRoll := mathrand.Intn(100)
+		states := []string{"idle", "light", "moderate", "heavy", "peak"}
+		state := states[mathrand.Intn(len(states))]
 		var activeCores int
-		var state string
 
-		switch {
-		case stateRoll < 15:
-			state = "idle"
+		switch state {
+		case "idle":
 			activeCores = 0
-		case stateRoll < 45:
-			state = "light"
+		case "light":
 			activeCores = 1
-		case stateRoll < 70:
-			state = "moderate"
+		case "moderate":
 			activeCores = maxCores / 2
 			if activeCores < 1 {
 				activeCores = 1
 			}
-		case stateRoll < 90:
-			state = "heavy"
+		case "heavy":
 			activeCores = maxCores - 1
 			if activeCores < 1 {
 				activeCores = 1
 			}
-		default:
-			state = "peak"
+		case "peak":
 			activeCores = maxCores
 		}
 
-		holdDuration := time.Duration(3+mathrand.Intn(18)) * time.Second
+		holdDuration := 30 * time.Second
 
 		logEvent("load", "state change", map[string]interface{}{
 			"tier":       tier,
@@ -240,15 +254,24 @@ func phaseLoadLoop(ctx context.Context) {
 		deadline := time.Now().Add(holdDuration)
 		for i := 0; i < activeCores; i++ {
 			wg.Add(1)
-			go func() {
+			go func(duty float64) {
 				defer wg.Done()
 				x := 1.0001
+				const window = 100 * time.Millisecond
+				burnDur := time.Duration(float64(window) * duty)
+				sleepDur := window - burnDur
 				for time.Now().Before(deadline) {
-					for j := 0; j < 100000; j++ {
-						x *= 1.0001
-						if x > 1e100 {
-							x = 1.0001
+					burnEnd := time.Now().Add(burnDur)
+					for time.Now().Before(burnEnd) {
+						for j := 0; j < 10000; j++ {
+							x *= 1.0001
+							if x > 1e100 {
+								x = 1.0001
+							}
 						}
+					}
+					if sleepDur > 0 {
+						time.Sleep(sleepDur)
 					}
 					select {
 					case <-ctx.Done():
@@ -256,74 +279,27 @@ func phaseLoadLoop(ctx context.Context) {
 					default:
 					}
 				}
-			}()
+			}(dutyCycle)
 		}
 		wg.Wait()
 	}
 }
 
-func burstDisk(ctx context.Context) {
-	sizeMB := 10 + mathrand.Intn(191)
-	logEvent("load", "disk burst started", map[string]interface{}{"size_mb": sizeMB})
-
-	filePath := "/tmp/loadgen_disk_burst.bin"
-	defer os.Remove(filePath)
-
-	f, err := os.Create(filePath)
-	if err != nil {
-		logEvent("load", "disk write failed", map[string]interface{}{"error": err.Error()})
-		return
-	}
-
-	buf := make([]byte, 1024*1024)
-	for i := 0; i < sizeMB; i++ {
-		select {
-		case <-ctx.Done():
-			f.Close()
-			return
-		default:
-		}
-		rand.Read(buf)
-		f.Write(buf)
-	}
-	f.Sync()
-	f.Close()
-
-	logEvent("load", "disk write complete, starting read", map[string]interface{}{"size_mb": sizeMB})
-
-	f2, err := os.Open(filePath)
-	if err != nil {
-		logEvent("load", "disk read failed", map[string]interface{}{"error": err.Error()})
-		return
-	}
-	io.Copy(io.Discard, f2)
-	f2.Close()
-
-	logEvent("load", "disk burst finished", map[string]interface{}{"size_mb": sizeMB})
-}
-
-// ---------------------------------------------------------------------------
-// Phase 2 (disk): Write random data to ephemeral storage
-// ---------------------------------------------------------------------------
-
 func phaseDiskWrite(ctx context.Context) {
+	setPhase("disk")
 	roll := mathrand.Intn(100)
 	var targetBytes int64
 	var label string
 	switch {
-	case roll < 70:
+	case roll < 90:
 		targetBytes = 500 * 1024 * 1024
 		label = "500 MB (normal)"
-	case roll < 90:
+	case roll < 98:
 		targetBytes = 1 * 1024 * 1024 * 1024
 		label = "1 GB"
-	case roll < 97:
+	default:
 		targetBytes = 3 * 1024 * 1024 * 1024
 		label = "3 GB"
-	default:
-		targetGB := int64(3) + mathrand.Int63n(8)
-		targetBytes = targetGB * 1024 * 1024 * 1024
-		label = fmt.Sprintf("%d GB (heavy)", targetGB)
 	}
 
 	logEvent("disk", "starting ephemeral storage write", map[string]interface{}{
@@ -353,7 +329,7 @@ func phaseDiskWrite(ctx context.Context) {
 		default:
 		}
 
-		rand.Read(chunk)
+		mathrand.Read(chunk)
 
 		filePath := filepath.Join(writeDir, fmt.Sprintf("data_%d.bin", fileIndex))
 		if err := os.WriteFile(filePath, chunk, 0644); err != nil {
@@ -385,10 +361,6 @@ func phaseDiskWrite(ctx context.Context) {
 		"files":           fileIndex,
 	})
 }
-
-// ---------------------------------------------------------------------------
-// Wait for detach — pod idles until warmpool label is removed/changed
-// ---------------------------------------------------------------------------
 
 const labelsPath = "/etc/podinfo/labels"
 
@@ -452,10 +424,6 @@ func isDetached() bool {
 	return true
 }
 
-// ---------------------------------------------------------------------------
-// Main
-// ---------------------------------------------------------------------------
-
 func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
@@ -471,20 +439,20 @@ func main() {
 		"go_version": runtime.Version(),
 	})
 
-	// Health endpoint — /_sandbox/status
 	go func() {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/_sandbox/status", func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			fmt.Fprintf(w, `{"status":"ok","ready":true,"pod":"%s"}`, podName)
+			phase, tier, duty, wsConn := getState()
+			fmt.Fprintf(w, `{"status":"ok","ready":true,"pod":"%s","phase":"%s","cpuTier":"%s","dutyPct":%.2f,"wsConnected":%t}`, podName, phase, tier, duty, wsConn)
 		})
 		if err := http.ListenAndServe(":3004", mux); err != nil {
 			logEvent("startup", "health server failed", map[string]interface{}{"error": err.Error()})
 		}
 	}()
 
-	// Wait for detach — blocks until controller sets warmpool=false
+	setPhase("idle")
 	waitForDetach(context.Background())
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -500,7 +468,6 @@ func main() {
 		cancel()
 	}()
 
-	// Initialize Cloud Monitoring client (non-fatal if it fails)
 	mc, err := newMetricsClient(ctx)
 	if err != nil {
 		logEvent("main", "Cloud Monitoring client init failed — probe will log only", map[string]interface{}{
@@ -512,15 +479,16 @@ func main() {
 
 	logEvent("scenario", "SCENARIO: active workload — controller owns lifetime", map[string]interface{}{
 		"phase_1": "download: 5 × 1MB from speedtest.tele2.net (Cloud NAT cost control)",
-		"phase_2": "disk: write 500 MB-10 GB random data to ephemeral storage",
-		"phase_3": "load loop: CPU bursts until controller terminates pod",
+		"phase_2": "disk: write 500 MB–3 GB random data to ephemeral storage",
+		"phase_3": "load loop: duty-cycled CPU (90% 300m / 8% 1core / 2% all) until SIGTERM",
+		"bg_ws":   "WebSocket session: ping/pong every 2s to Cloud Run",
 	})
 
 	go probeNetworkAccess(ctx, mc)
+	go wsSessionLoop(ctx)
 
-	// Phase 1: Downloads
 	logEvent("scenario", "═══ PHASE 1: DOWNLOAD ═══", map[string]interface{}{
-		"description": "fetching random data from speedtest servers to simulate artifact downloads",
+		"description": "fetching random data from speedtest servers",
 	})
 	phaseDownload(ctx)
 
@@ -529,9 +497,8 @@ func main() {
 		return
 	}
 
-	// Phase 2: Disk write
 	logEvent("scenario", "═══ PHASE 2: DISK WRITE ═══", map[string]interface{}{
-		"description": "writing random data to ephemeral storage to simulate workspace usage",
+		"description": "writing random data to ephemeral storage",
 	})
 	phaseDiskWrite(ctx)
 
@@ -540,9 +507,8 @@ func main() {
 		return
 	}
 
-	// Phase 3: Load loop — runs indefinitely until controller kills the pod
 	logEvent("scenario", "═══ PHASE 3: LOAD LOOP ═══", map[string]interface{}{
-		"description": "CPU bursts running until controller terminates pod via TTL",
+		"description": "CPU bursts until controller terminates pod",
 	})
 	phaseLoadLoop(ctx)
 

@@ -23,3 +23,9 @@ app/sandbox/sandbox-sim
 
 # Test logs
 app/tests/logs/
+
+# Cilium config backups (auto-generated)
+gke/manual/cilium-config-backup-*.json
+
+# Deploy tag (auto-generated)
+app/.current-tag

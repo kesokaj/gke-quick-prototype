@@ -295,6 +295,7 @@
 
 <script>
 const API = '';
+const sandboxStatusCache = {}; // name → {phase, cpuTier, dutyPct, wsConnected}
 
 // --- Data Fetch (no full-page refresh) ---
 async function fetchStatus() {
@@ -391,11 +392,28 @@ function renderTable(sandboxes) {
     }
     updateCell(cells[6], metricsHtml);
 
-    // Cell 7: Config
+    // Cell 7: Config + Live Status
     let configHtml = '—';
     if (sb.config) {
       const parts = [`⏱ ${sb.config.lifetime}`];
       configHtml = `<div class="config-info">${parts.map(p=>`<span>${p}</span>`).join('')}</div>`;
+    }
+    // Show live status for claimed sandboxes.
+    const isClaimed7 = sb.state==='active' || sb.state==='provisioning';
+    const cached = sandboxStatusCache[sb.name];
+    if (isClaimed7 && cached) {
+      const phaseColors = {idle:'var(--dim)',download:'#f472b6',disk:'#fb923c',load:'#facc15'};
+      const phaseColor = phaseColors[cached.phase] || 'var(--dim)';
+      const wsIcon = cached.wsConnected ? '🔗' : '❌';
+      const wsColor = cached.wsConnected ? 'var(--green)' : 'var(--red)';
+      configHtml += `<div style="margin-top:3px;font-size:10px;display:flex;gap:6px;align-items:center">`
+        + `<span style="color:${phaseColor};font-weight:600;text-transform:uppercase">${cached.phase||'?'}</span>`
+        + (cached.cpuTier ? `<span style="color:var(--amber)">⚡${cached.cpuTier}</span>` : '')
+        + (cached.dutyPct ? `<span style="color:var(--dim)">${Math.round(cached.dutyPct*1000)}m</span>` : '')
+        + `<span style="color:${wsColor}" title="WebSocket ${cached.wsConnected?'connected':'disconnected'}">${wsIcon} WS</span>`
+        + `</div>`;
+    } else if (isClaimed7) {
+      configHtml += `<div style="margin-top:3px;font-size:10px;color:var(--dim)">⏳ loading...</div>`;
     }
     updateCell(cells[7], configHtml);
 
@@ -910,8 +928,33 @@ function escHtml(s) {
   return el.innerHTML;
 }
 
+// --- Fetch live status for claimed sandboxes ---
+async function fetchSandboxStatuses() {
+  try {
+    const res = await fetch(`${API}/api/sandboxes`);
+    const sandboxes = await res.json();
+    if (!sandboxes) return;
+    const claimed = sandboxes.filter(s => s.state === 'active' || s.state === 'provisioning');
+    // Clean cache for removed sandboxes.
+    for (const name of Object.keys(sandboxStatusCache)) {
+      if (!claimed.find(s => s.name === name)) delete sandboxStatusCache[name];
+    }
+    // Fetch status for each claimed sandbox (in parallel, max 10).
+    const batch = claimed.slice(0, 10);
+    await Promise.allSettled(batch.map(async sb => {
+      try {
+        const sr = await fetch(`${API}/api/sandboxes/${sb.name}/status`);
+        if (sr.ok) {
+          const data = await sr.json();
+          sandboxStatusCache[sb.name] = data;
+        }
+      } catch(_) {}
+    }));
+  } catch(_) {}
+}
+
 // --- Refresh Loop (targeted, not full-page) ---
-function refresh() { fetchStatus(); fetchSandboxes(); fetchMetricsSummary(); }
+function refresh() { fetchStatus(); fetchSandboxes(); fetchMetricsSummary(); fetchSandboxStatuses(); }
 refresh(); // initial load
 setInterval(refresh, 5000); // every 5s, targeted updates only
 
