@@ -112,7 +112,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --duration N       Benchmark duration in minutes (default: 60)"
             echo "  --baseline N       Warmpool size, set once at start (default: 100)"
             echo "  --surge-min N      Min claims per surge phase (default: 20)"
-            echo "  --surge-max N      Max claims per surge phase (default: 100)"
+            echo "  --surge-max N      Max claims per surge/spike phase (default: 100)"
             echo "  --lifetime DUR     Max TTL per sandbox, random 2m to this (default: 5m)"
             echo "  --concurrency N    Max parallel HTTP requests (default: 50)"
             echo "  --deterministic    Fixed repeating cycles"
@@ -153,7 +153,12 @@ get_exhausted() { cat "${COUNT_DIR}/exhausted" 2>/dev/null || echo 0; }
 # Print actual API error once per type per phase
 log_error() {
     local err="$1"
-    local hash; hash=$(echo "$err" | md5sum | cut -d' ' -f1)
+    local hash
+    if command -v md5sum &>/dev/null; then
+        hash=$(echo "$err" | md5sum | cut -d' ' -f1)
+    else
+        hash=$(echo "$err" | md5 -q)
+    fi
     if [[ ! -f "${COUNT_DIR}/err_${hash}" ]]; then
         warn "API Error: ${err}"
         touch "${COUNT_DIR}/err_${hash}"
@@ -405,8 +410,11 @@ phase_steady() {
 
     phase_banner "${label}  (${duration_sec}s)"
 
-    local elapsed=0
-    while [[ $elapsed -lt $duration_sec ]]; do
+    local start_ts; start_ts=$(date +%s)
+    local last_status=0
+    while true; do
+        local elapsed=$(( $(date +%s) - start_ts ))
+        (( elapsed >= duration_sec )) && break
         [[ "$INTERRUPTED" == "true" ]] && return
         is_expired && return
 
@@ -416,13 +424,11 @@ phase_steady() {
 
         claim_batch "$batch"
 
-        local wait_secs
-        wait_secs=$(rand_between 1 3)
-        sleep "$wait_secs"
-        elapsed=$((elapsed + wait_secs))
+        sleep $(rand_between 1 3)
 
-        if (( elapsed % 15 < 5 )); then
+        if (( elapsed - last_status >= 15 )); then
             status_line
+            last_status=$elapsed
         fi
     done
     status_line
@@ -491,6 +497,9 @@ phase_surge() {
 
 # SPIKE: claim surge-max all at once (flash crowd — fire and forget, no retry)
 phase_spike() {
+    [[ "$INTERRUPTED" == "true" ]] && return
+    is_expired && return
+
     local target="$SURGE_MAX"
     phase_banner "SPIKE  (${target} claims at once — no retry)"
     log "🔥 Flash crowd: ${target} simultaneous claims"
@@ -504,8 +513,11 @@ phase_quiet() {
 
     phase_banner "QUIET  (${duration_sec}s, pool recovery)"
 
-    local elapsed=0
-    while [[ $elapsed -lt $duration_sec ]]; do
+    local start_ts; start_ts=$(date +%s)
+    local last_status=0
+    while true; do
+        local elapsed=$(( $(date +%s) - start_ts ))
+        (( elapsed >= duration_sec )) && break
         [[ "$INTERRUPTED" == "true" ]] && return
         is_expired && return
 
@@ -517,10 +529,10 @@ phase_quiet() {
         fi
 
         sleep 1
-        elapsed=$((elapsed + 1))
 
-        if (( elapsed % 10 == 0 )); then
+        if (( elapsed - last_status >= 10 )); then
             status_line
+            last_status=$elapsed
         fi
     done
     status_line
