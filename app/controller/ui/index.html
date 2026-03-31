@@ -180,8 +180,9 @@
     </div>
     <div class="metric-avg" id="claimAvg">avg: —</div>
   </div>
-  <div style="display:flex;align-items:center;margin-left:auto;">
+  <div style="display:flex;align-items:center;gap:8px;margin-left:auto;">
     <button class="btn" style="background:#e74c3c;color:#fff;border:none;border-radius:6px;padding:8px 14px;cursor:pointer;font-size:12px;font-weight:600;" onclick="resetMetrics()" title="Reset all metric counters">🗑 Reset Metrics</button>
+    <button class="btn" style="background:#dc2626;color:#fff;border:none;border-radius:6px;padding:8px 14px;cursor:pointer;font-size:12px;font-weight:600;" onclick="killAllClaimed()" title="Force-delete all claimed sandboxes">💀 Kill All Claimed</button>
   </div>
 </div>
 
@@ -749,6 +750,22 @@ async function restartPool() {
     else toast(d.error, 'error');
     refresh();
   } catch(e) { toast('Restart failed: '+e, 'error'); }
+}
+
+async function killAllClaimed() {
+  const active = document.getElementById('statActive').textContent;
+  if (!confirm(`Kill all ${active} claimed sandboxes? This cannot be undone.`)) return;
+  try {
+    toast('Killing all claimed sandboxes...', 'info');
+    const res = await fetch(`${API}/api/claimed`, { method: 'DELETE' });
+    const d = await res.json();
+    if (res.ok) {
+      toast(`Killed ${d.deleted} claimed sandboxes`, 'success');
+      refresh();
+    } else {
+      toast(d.error || 'Failed', 'error');
+    }
+  } catch(e) { toast('Kill failed: '+e, 'error'); }
 }
 
 async function resetMetrics() {

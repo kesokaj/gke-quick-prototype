@@ -61,6 +61,7 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/provision", h.handleProvision)
 	mux.HandleFunc("POST /api/sandboxes/", h.handleSandboxAction)
 	mux.HandleFunc("DELETE /api/sandboxes/", h.handleDeleteSandbox)
+	mux.HandleFunc("DELETE /api/claimed", h.handleDeleteAllClaimed)
 
 	mux.HandleFunc("GET /api/metrics/summary", h.handleMetricsSummary)
 	mux.HandleFunc("POST /api/metrics/reset", h.handleMetricsReset)
@@ -427,6 +428,38 @@ func parseExpiry(lifetime string) (time.Time, error) {
 	}
 
 	return time.Now().Add(d), nil
+}
+
+func (h *Handlers) handleDeleteAllClaimed(w http.ResponseWriter, r *http.Request) {
+	pods, err := h.client.CoreV1().Pods(h.namespace).List(r.Context(), metav1.ListOptions{
+		LabelSelector: "managed-by=warmpool,warmpool=false",
+	})
+	if err != nil {
+		slog.Error("failed to list claimed pods", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	deleted := 0
+	grace := int64(0)
+	for i := range pods.Items {
+		name := pods.Items[i].Name
+		if err := h.client.CoreV1().Pods(h.namespace).Delete(r.Context(), name, metav1.DeleteOptions{
+			GracePeriodSeconds: &grace,
+		}); err == nil {
+			h.store.Remove(name)
+			deleted++
+		} else {
+			slog.Error("failed to delete claimed pod", "name", name, "error", err)
+		}
+	}
+
+	select {
+	case h.kickCh <- struct{}{}:
+	default:
+	}
+	slog.Info("killed all claimed pods", "deleted", deleted, "total", len(pods.Items))
+	writeJSON(w, http.StatusOK, map[string]interface{}{"deleted": deleted})
 }
 
 func extractName(path string) string {

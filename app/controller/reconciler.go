@@ -51,7 +51,7 @@ func NewReconciler(client kubernetes.Interface, restConfig *rest.Config, mc metr
 // Run starts the reconciler loop.
 func (r *Reconciler) Run(ctx context.Context) {
 	slog.Info("reconciler started", "namespace", r.namespace, "deploy", r.deployName)
-	ticker := time.NewTicker(5 * time.Second)
+	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
 	for {
@@ -91,9 +91,16 @@ func (r *Reconciler) sync(ctx context.Context) {
 		r.store.SetPoolSize(int(*deploy.Spec.Replicas))
 	}
 
-	metricsMap := r.fetchMetrics(ctx)
+	// Fetch metrics concurrently — don't block pod state sync.
+	metricsCh := make(chan map[string]*PodMetrics, 1)
+	go func() {
+		metricsCh <- r.fetchMetrics(ctx)
+	}()
 
 	liveNames := make(map[string]bool, len(pods.Items))
+
+	// Wait for metrics (ran concurrently during pod list).
+	metricsMap := <-metricsCh
 
 	for i := range pods.Items {
 		pod := &pods.Items[i]
