@@ -2,6 +2,79 @@
 
 Idempotent, `.env`-driven GKE cluster lifecycle management with gVisor sandboxing, warm pool controller, and full observability.
 
+## Architecture
+
+![Infrastructure Architecture](docs/images/infrastructure.png)
+
+<details>
+<summary>View Mermaid Source</summary>
+
+```mermaid
+flowchart TB
+    User((User / QA))
+    Admin((Cluster Admin))
+
+    subgraph GCP["Google Cloud Platform"]
+        subgraph VPC["VPC Network"]
+            CloudNAT[Cloud NAT]
+            
+            subgraph GKE["GKE Cluster"]
+                subgraph DefaultPool["Default Node Pool (AMD/ARM)"]
+                    direction TB
+                    Controller["Sandbox Controller\n(Deployment)"]
+                    UI["Web UI Dashboard"]
+                    ControllerApi["REST API & WS Proxy"]
+                    Controller --> UI
+                    Controller --> ControllerApi
+                end
+                
+                subgraph SecPool["Secondary Node Pool\n(gVisor Enabled, Autoscaled)"]
+                    direction TB
+                    WarmPool["Sandbox Warm Pool\n(Pod Replicas)"]
+                    ActivePods["Active / Claimed Pods\n(Running Workloads)"]
+                    WarmPool -. "Controller claims pod\nchanges label" .-> ActivePods
+                end
+                
+                subgraph Observability["Observability Stack"]
+                    PromSDC["prom-to-sd (conntrack)"]
+                    PromSDG["prom-to-sd (gVisor)"]
+                    GMP["GMP PodMonitoring"]
+                end
+            end
+        end
+
+        subgraph Serverless["Cloud Run"]
+            WSServer["WebSocket Server\n(External Sessions)"]
+        end
+        
+        MonitoringMetrics[Cloud Monitoring Dashboard]
+    end
+
+    User -->|Views / Claims / Exec| UI
+    Admin -->|kubectl / cluster.sh| GCP
+    
+    ControllerApi -->|Monitors / Scales| WarmPool
+    ControllerApi -->|K8s Exec API| ActivePods
+    
+    ActivePods -->|Egress / Simulations| CloudNAT
+    ActivePods -->|Persistent Session| WSServer
+    
+    Observability -->|Exports Metrics| MonitoringMetrics
+    Controller -->|Exports Metrics (GMP)| MonitoringMetrics
+    
+    classDef user fill:#f9f,stroke:#333,stroke-width:2px;
+    classDef gcp fill:#e6f3ff,stroke:#82b1ff,stroke-width:2px,color:#000;
+    classDef k8s fill:#e8f5e9,stroke:#66bb6a,stroke-width:2px,color:#000;
+    classDef component fill:#fff3e0,stroke:#ffb74d,stroke-width:2px,color:#000;
+    
+    class User,Admin user;
+    class GCP,VPC,Serverless,MonitoringMetrics,CloudNAT gcp;
+    class GKE,DefaultPool,SecPool,Observability k8s;
+    class Controller,UI,ControllerApi,WarmPool,ActivePods,WSServer,PromSDC,PromSDG,GMP component;
+```
+
+</details>
+
 ## Prerequisites
 
 | Tool | Purpose | Install |

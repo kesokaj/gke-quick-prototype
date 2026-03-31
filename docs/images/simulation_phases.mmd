@@ -1,0 +1,30 @@
+flowchart TD
+    Start((Pod Created))
+    
+    subgraph IdlePhase["Idle Phase (warmpool=true)"]
+        Wait[waitForDetach]
+        Wait -.->|poll every 1s| Wait
+        Wait -.->|log every 10s| Heartbeat[Emit Heartbeat Log]
+    end
+    
+    subgraph ActivePhase["Active Phase (warmpool=false)"]
+        P1["Phase 1: Download\nFetch 5x1MB files"]
+        P2["Phase 2: Disk Write\nWrite 500MB - 3GB"]
+        P3["Phase 3: CPU Load Loop\nCycle light/med/heavy load"]
+        
+        P1 --> P2
+        P2 --> P3
+        P3 -->|duty cycle changes\nevery 30s| P3
+    end
+    
+    End((SIGTERM / TTL Expiry))
+    
+    Start --> IdlePhase
+    IdlePhase -->|"Controller claims via label"| ActivePhase
+    ActivePhase --> End
+    
+    classDef phase fill:#f5f5f5,stroke:#9e9e9e,stroke-width:2px,color:#000;
+    classDef state fill:#e3f2fd,stroke:#42a5f5,stroke-width:2px,color:#000;
+    
+    class IdlePhase,ActivePhase phase;
+    class Wait,Heartbeat,P1,P2,P3 state;

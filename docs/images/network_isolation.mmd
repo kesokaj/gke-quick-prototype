@@ -1,0 +1,37 @@
+flowchart LR
+    subgraph Sandbox Namespace
+        Pod["Sandbox Pod (gVisor)"]
+    end
+    
+    subgraph Allowed Egress
+        Internet((Internet))
+        PublicDNS((Public DNS\n8.8.8.8, 1.1.1.1))
+    end
+    
+    subgraph Blocked Egress
+        KubeDNS((kube-dns))
+        InternalIPs((RPC1918 / CGNAT))
+        Metadata((GCE Metadata))
+    end
+    
+    subgraph Allowed Ingress
+        Ctrl["Controller\n(sandbox-control ns)"]
+    end
+    
+    Pod -->|HTTPS / WSS| Internet
+    Pod -->|UDP 53| PublicDNS
+    
+    Pod -.->|Blocked| KubeDNS
+    Pod -.->|Blocked| InternalIPs
+    Pod -.->|Blocked| Metadata
+    
+    Ctrl -->|TCP 3004\nProbes / Status| Pod
+    Internet -.->|Blocked| Pod
+    
+    classDef blocked fill:#ffebee,stroke:#ef5350,stroke-width:2px,color:#c62828,stroke-dasharray: 5 5;
+    classDef allowed fill:#e8f5e9,stroke:#66bb6a,stroke-width:2px,color:#2e7d32;
+    classDef pod fill:#e3f2fd,stroke:#42a5f5,stroke-width:2px,color:#1565c0;
+    
+    class KubeDNS,InternalIPs,Metadata blocked;
+    class Internet,PublicDNS,Ctrl allowed;
+    class Pod pod;

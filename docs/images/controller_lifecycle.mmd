@@ -1,0 +1,19 @@
+flowchart TD
+    User([User / API Request]) -->|POST /api/provision| Ctrl
+
+    subgraph "K8s ReplicaSet (sandbox-pool)"
+        pod1[Pod A\nwarmpool=true]
+        pod2[Pod B\nwarmpool=true]
+        pod3[Pod C\nwarmpool=true]
+    end
+
+    Ctrl{Sandbox\nController} -->|"Selects Ready Pod"| pod1
+    Ctrl -.->|"1. Updates label\nwarmpool=false"| pod1
+    
+    pod1 -.->|"2. Detaches"| activePod[Pod A\nwarmpool=false\nActive Workload]
+    
+    K8s[K8s Control Plane] -.->|"3. Reconciles missing replica"| pod4[New Pod D\nwarmpool=true]
+    
+    subgraph "Claimed / Active"
+        activePod
+    end

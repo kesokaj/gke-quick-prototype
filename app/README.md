@@ -26,6 +26,35 @@ app/
 
 Manages a warm pool of sandbox pods via a K8s Deployment. Pods sit idle until claimed (detached from the Deployment by flipping `warmpool=false` label). When a pod is detached, K8s auto-replaces it.
 
+![Controller Lifecycle](docs/images/controller_lifecycle.png)
+
+<details>
+<summary>View Mermaid Source</summary>
+
+```mermaid
+flowchart TD
+    User([User / API Request]) -->|POST /api/provision| Ctrl
+
+    subgraph "K8s ReplicaSet (sandbox-pool)"
+        pod1[Pod A\nwarmpool=true]
+        pod2[Pod B\nwarmpool=true]
+        pod3[Pod C\nwarmpool=true]
+    end
+
+    Ctrl{Sandbox\nController} -->|Selects Ready Pod| pod1
+    Ctrl -.->|1. Updates label\nwarmpool=false| pod1
+    
+    pod1 -.->|2. Detaches| activePod[Pod A\nwarmpool=false\nActive Workload]
+    
+    K8s[K8s Control Plane] -.->|3. Reconciles missing replica| pod4[New Pod D\nwarmpool=true]
+    
+    subgraph "Claimed / Active"
+        activePod
+    end
+```
+
+</details>
+
 **Features:**
 - Pool size management (scales Deployment replicas)
 - Provision/claim sandboxes with lifetime expiry
@@ -62,6 +91,53 @@ Runs inside gVisor-sandboxed pods. Simulates realistic user workloads:
 4. **Background:** WebSocket session to Cloud Run (ping/pong every 2s), network probe to 8.8.8.8
 
 ### Network Isolation
+
+![Network Isolation](docs/images/network_isolation.png)
+
+<details>
+<summary>View Mermaid Source</summary>
+
+```mermaid
+flowchart LR
+    subgraph Sandbox Namespace
+        Pod["Sandbox Pod (gVisor)"]
+    end
+    
+    subgraph Allowed Egress
+        Internet((Internet))
+        PublicDNS((Public DNS\n8.8.8.8, 1.1.1.1))
+    end
+    
+    subgraph Blocked Egress
+        KubeDNS((kube-dns))
+        InternalIPs((RPC1918 / CGNAT))
+        Metadata((GCE Metadata))
+    end
+    
+    subgraph Allowed Ingress
+        Ctrl["Controller\n(sandbox-control ns)"]
+    end
+    
+    Pod -->|HTTPS / WSS| Internet
+    Pod -->|UDP 53| PublicDNS
+    
+    Pod -.->|Blocked| KubeDNS
+    Pod -.->|Blocked| InternalIPs
+    Pod -.->|Blocked| Metadata
+    
+    Ctrl -->|TCP 3004\nProbes / Status| Pod
+    Internet -.->|Blocked| Pod
+    
+    classDef blocked fill:#ffebee,stroke:#ef5350,stroke-width:2px,color:#c62828,stroke-dasharray: 5 5;
+    classDef allowed fill:#e8f5e9,stroke:#66bb6a,stroke-width:2px,color:#2e7d32;
+    classDef pod fill:#e3f2fd,stroke:#42a5f5,stroke-width:2px,color:#1565c0;
+    
+    class KubeDNS,InternalIPs,Metadata blocked;
+    class Internet,PublicDNS,Ctrl allowed;
+    class Pod pod;
+```
+
+</details>
 
 Sandbox pods (`sandbox-isolation.yaml`) enforce strict isolation:
 - **Egress:** Internet only — all RFC1918, CGNAT, loopback, link-local, and metadata server blocked
