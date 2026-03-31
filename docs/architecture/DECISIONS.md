@@ -143,3 +143,24 @@ Additionally, after benchmarks, hundreds of claimed (detached) pods lingered wit
 - Post-benchmark cleanup is instant via UI button
 - Benchmark script works on both macOS and Linux without additional dependencies
 
+## ADR-007: Sync Health Failsafe and Real-time UI Observability
+
+**Date:** 2026-03-31
+**Status:** Accepted
+
+### Context
+
+During high-churn benchmarking, potential disconnects between the controller's internal state (in-memory store) and the actual Kubernetes API pod labels (`warmpool=true/false`) could leave the system with stale metrics or "ghost" pods that cannot be claimed. Additionally, there was limited visibility into real-time throughput rates (Claims/sec and Scheduled/sec) and the health of the 1s sync loop from the dashboard.
+
+### Decision
+
+- **Sync Health Tracking**: The `Store` now tracks `lastSync` timestamps and exposing a `synced` boolean (valid if `lastSyncSec < 15`) and `lastSyncSec` through `/api/status`. The UI surfaces this as a "Last Sync" badge and a full-width red error banner if the sync goes stale for >15s.
+- **State Mismatch Failsafe**: The `reconciler` compares the actual GKE pod label (`warmpool=true` -> idle) against its internal state. If a pod is `active` or `provisioning` internally but GKE says it's idle, the controller automatically forces a state reversion to `idle` and increments a `MismatchCount`.
+- **Throughput Metrics**: Injected `sandbox_claim_total` (incremented on detachment) and `sandbox_scheduled_total` (incremented when a pod becomes Ready). Chart.js is added to the UI to render real-time sliding-window (60s) line charts for claims/sec and scheduled/sec.
+- **Prometheus Observability**: Exposed `sandbox_sync_mismatch_total`, `sandbox_claim_total`, and `sandbox_scheduled_total` metrics natively via the controller's `/metrics` endpoint.
+
+### Consequences
+
+- The system now auto-heals when data drift occurs between internal memory and K8s API.
+- Users receive immediate visual feedback on the health of the link between the Controller and GKE.
+- The UI graphs provide precise visibility into the API throughput without relying on external GCP monitoring dashboards.

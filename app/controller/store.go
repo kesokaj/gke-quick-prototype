@@ -38,19 +38,26 @@ type Sandbox struct {
 
 // StatusResponse is the response for GET /api/status.
 type StatusResponse struct {
-	Idle     int `json:"idle"`
-	Pending  int `json:"pending"`
-	Active   int `json:"active"`
-	Failed   int `json:"failed"`
-	Total    int `json:"total"`
-	PoolSize int `json:"poolSize"`
+	Idle           int     `json:"idle"`
+	Pending        int     `json:"pending"`
+	Active         int     `json:"active"`
+	Failed         int     `json:"failed"`
+	Total          int     `json:"total"`
+	PoolSize       int     `json:"poolSize"`
+	LastSyncSec    float64 `json:"lastSyncSec"`
+	Synced         bool    `json:"synced"`
+	MismatchCount  int     `json:"mismatchCount"`
+	TotalClaims    int64   `json:"totalClaims"`
+	TotalScheduled int64   `json:"totalScheduled"`
 }
 
 // Store is the in-memory source of truth for all sandbox state.
 type Store struct {
-	mu        sync.RWMutex
-	sandboxes map[string]*Sandbox
-	poolSize  int
+	mu            sync.RWMutex
+	sandboxes     map[string]*Sandbox
+	poolSize      int
+	lastSync      time.Time
+	mismatchCount int
 }
 
 // NewStore creates a new store with the given pool size target.
@@ -136,11 +143,24 @@ func (s *Store) ClaimIdle() *Sandbox {
 	return nil
 }
 
-// Status returns aggregated counts.
+// Status returns aggregated counts and health metrics.
 func (s *Store) Status() StatusResponse {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	resp := StatusResponse{PoolSize: s.poolSize}
+
+	lastSyncSec := time.Since(s.lastSync).Seconds()
+	if s.lastSync.IsZero() {
+		lastSyncSec = -1
+	}
+
+	resp := StatusResponse{
+		PoolSize:       s.poolSize,
+		LastSyncSec:    lastSyncSec,
+		Synced:         !s.lastSync.IsZero() && lastSyncSec < 15,
+		MismatchCount:  s.mismatchCount,
+		TotalClaims:    int64(extractCounterValue(sandboxClaimTotal)),
+		TotalScheduled: int64(extractCounterValue(sandboxScheduledTotal)),
+	}
 	for _, sb := range s.sandboxes {
 		switch sb.State {
 		case "idle":
@@ -155,6 +175,14 @@ func (s *Store) Status() StatusResponse {
 		resp.Total++
 	}
 	return resp
+}
+
+// RecordSyncSuccess marks a successful K8s sync.
+func (s *Store) RecordSyncSuccess(mismatchCount int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lastSync = time.Now()
+	s.mismatchCount = mismatchCount
 }
 
 // Prune removes sandboxes not present in the given set of live pod names.

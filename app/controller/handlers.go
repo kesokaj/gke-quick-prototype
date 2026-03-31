@@ -177,6 +177,7 @@ func (h *Handlers) handleProvision(w http.ResponseWriter, r *http.Request) {
 	slog.Info("metric: claim-to-ready", "name", sb.Name, "duration_s", fmt.Sprintf("%.3f", claimDuration))
 
 	h.store.Upsert(sb)
+	sandboxClaimTotal.Inc()
 
 	select {
 	case h.kickCh <- struct{}{}:

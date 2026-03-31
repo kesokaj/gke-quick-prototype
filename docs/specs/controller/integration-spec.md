@@ -21,7 +21,7 @@ The sandbox controller manages a warm pool of sandbox pods via a Kubernetes Depl
 
 | Method   | Path              | Description                          |
 | -------- | ----------------- | ------------------------------------ |
-| `GET`    | `/api/status`     | Pool counts (idle, pending, active, failed, total, poolSize) |
+| `GET`    | `/api/status`     | Pool counts and sync health (idle, pending, active, failed, total, poolSize, lastSyncSec, synced, mismatchCount, totalClaims, totalScheduled) |
 | `PUT`    | `/api/pool-size`  | Set Deployment replicas              |
 | `DELETE` | `/api/claimed`    | Force-delete all claimed sandboxes   |
 

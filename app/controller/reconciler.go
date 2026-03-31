@@ -101,6 +101,7 @@ func (r *Reconciler) sync(ctx context.Context) {
 
 	// Wait for metrics (ran concurrently during pod list).
 	metricsMap := <-metricsCh
+	mismatchCount := 0
 
 	for i := range pods.Items {
 		pod := &pods.Items[i]
@@ -175,9 +176,16 @@ func (r *Reconciler) sync(ctx context.Context) {
 			}
 			sb.ReadyObserved = true
 		}
-		if state == "active" && exists && existing.State == "idle" {
+		if state == "active" && exists && (existing.State == "idle" || existing.State == "pending") {
 			now := time.Now()
 			sb.DetachedAt = &now
+		}
+
+		// Detection: If GKE says it's idle (warmpool=true) but the store thinks it's claimed.
+		if exists && state == "idle" && (existing.State == "active" || existing.State == "provisioning") {
+			mismatchCount++
+			sandboxSyncMismatchTotal.Inc()
+			slog.Warn("sync: state mismatch detected, reverting pod to idle", "name", sb.Name, "oldState", existing.State)
 		}
 
 		// Record schedule duration when a pod first becomes Ready.
@@ -186,12 +194,14 @@ func (r *Reconciler) sync(ctx context.Context) {
 			sandboxScheduleDuration.Observe(duration)
 			sb.ScheduleObserved = true
 			slog.Info("metric: sandbox scheduled", "name", sb.Name, "duration_s", fmt.Sprintf("%.3f", duration))
+			sandboxScheduledTotal.Inc()
 		}
 
 		r.store.Upsert(sb)
 	}
 
 	r.store.Prune(liveNames)
+	r.store.RecordSyncSuccess(mismatchCount)
 	r.updateGauges()
 	r.gc(ctx)
 	r.gcCompletedPods(ctx)

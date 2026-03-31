@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Sandbox Controller</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
     :root {
       --bg: #0f1117; --card: #1a1d28; --border: #2d3142; --text: #e0e0e0; --dim: #8a8fa0;
@@ -12,7 +13,6 @@
     }
     * { margin:0; padding:0; box-sizing:border-box; }
     body { font-family: -apple-system,'Segoe UI',Roboto,monospace; background:var(--bg); color:var(--text); }
-
     .header { display:flex; justify-content:space-between; align-items:center; padding:16px 24px; border-bottom:1px solid var(--border); }
     .header h1 { font-size:18px; font-weight:600; }
     .header-right { display:flex; align-items:center; gap:12px; }
@@ -21,10 +21,13 @@
     .pool-ctrl input { width:48px; background:var(--bg); border:1px solid var(--border); border-radius:4px; padding:4px 6px; color:var(--text); font-size:13px; text-align:center; -moz-appearance:textfield; }
     .pool-ctrl input::-webkit-inner-spin-button, .pool-ctrl input::-webkit-outer-spin-button { -webkit-appearance:none; margin:0; }
     .pool-ctrl .btn-restart { background:#e74c3c; font-size:10px; padding:4px 8px; }
+
     .pool-ctrl .btn-restart:hover { background:#c0392b; }
     .pool-ctrl button { background:var(--accent); color:#fff; border:none; border-radius:4px; padding:4px 10px; cursor:pointer; font-size:11px; font-weight:600; }
+    .header-right .btn-primary { background:var(--green); color:#000; border-radius:6px; font-weight:700; transition:transform .1s; }
+    .header-right .btn-primary:active { transform:scale(.97); }
 
-    .stats { display:grid; grid-template-columns:repeat(6,1fr); gap:12px; padding:16px 24px; }
+    .stats { display:grid; grid-template-columns:repeat(7,1fr); gap:12px; padding:16px 24px; }
     .stat { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:16px; }
     .stat-label { font-size:11px; text-transform:uppercase; color:var(--dim); letter-spacing:.5px; }
     .stat-value { font-size:28px; font-weight:700; margin-top:4px; transition:color .3s; }
@@ -51,7 +54,7 @@
     .sched-slow { color:var(--red); }
 
     .toolbar { padding:8px 24px; display:flex; gap:12px; align-items:center; }
-    .search-box { flex:1; max-width:300px; background:var(--card); border:1px solid var(--border); border-radius:6px; padding:8px 12px; color:var(--text); font-size:13px; }
+    .search-box { flex:1; max-width:600px; background:var(--card); border:1px solid var(--border); border-radius:6px; padding:10px 16px; color:var(--text); font-size:14px; }
     .search-box::placeholder { color:var(--dim); }
     .btn { display:inline-flex; align-items:center; gap:6px; padding:8px 16px; border-radius:6px; border:none; cursor:pointer; font-size:13px; font-weight:600; transition:opacity .2s; }
     .btn:hover { opacity:.85; } .btn-primary { background:var(--green); color:#000; }
@@ -107,6 +110,22 @@
     .modal-header h3 { margin:0; font-size:14px; }
     .modal-header button { background:none; border:none; color:var(--dim); cursor:pointer; font-size:18px; }
     .modal-body { padding:16px; overflow-y:auto; flex:1; }
+    .sync-banner {
+      background: #e74c3c;
+      color: #fff;
+      padding: 8px 16px;
+      text-align: center;
+      font-size: 14px;
+      font-weight: 600;
+      border-radius: 6px;
+      margin: 12px 20px 0 20px;
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0% { opacity: 1; }
+      50% { opacity: 0.8; }
+      100% { opacity: 1; }
+    }
     .modal-body pre { background:var(--bg); padding:12px; border-radius:6px; font-size:11px; line-height:1.5; white-space:pre-wrap; word-break:break-all; color:var(--text); max-height:400px; overflow-y:auto; margin:0; }
     .modal-body .event-row { display:flex; gap:12px; padding:6px 0; border-bottom:1px solid var(--border); font-size:11px; }
     .modal-body .event-row .type { min-width:50px; font-weight:600; }
@@ -129,13 +148,29 @@
     .sql-result.empty { color:var(--dim); font-style:italic; }
     .pg-conn { font-size:10px; font-family:monospace; color:var(--green); cursor:pointer; padding:2px 6px; background:rgba(34,197,94,.1); border-radius:3px; display:inline-block; margin-top:2px; }
     .pg-conn:hover { background:rgba(34,197,94,.2); }
+
+    .throughput-graphs { display:grid; grid-template-columns:1fr 1fr; gap:12px; padding:0 24px 12px; }
+    .graph-card { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:14px 16px; }
+    .graph-card h3 { font-size:12px; color:var(--dim); text-transform:uppercase; letter-spacing:.5px; margin-bottom:10px; }
+    .graph-container { height:120px; position:relative; }
   </style>
 </head>
 <body>
 
+<body>
+
+<div class="sync-banner" id="syncBanner" style="display:none;">
+  ⚠️ Sync Error: Controller data is stale. Check connectivity to GKE. (Last sync: <span id="syncBannerTime">?</span>s ago)
+</div>
+
 <div class="header">
   <h1>🔥 Sandbox Controller</h1>
   <div class="header-right">
+    <button class="btn btn-primary" onclick="openProvision()" style="font-size:11px;padding:6px 12px;">+ Provision Sandbox</button>
+    <div style="display:flex;gap:4px;">
+      <button class="btn" style="background:#e74c3c;color:#fff;font-size:10px;padding:6px 10px;" onclick="resetMetrics()" title="Reset all metric counters">🗑 Reset</button>
+      <button class="btn" style="background:#dc2626;color:#fff;font-size:10px;padding:6px 10px;" onclick="killAllClaimed()" title="Force-delete all claimed sandboxes">💀 Kill All</button>
+    </div>
     <div class="pool-ctrl">
       <label>Pool Size</label>
       <div class="preset-btns">
@@ -159,6 +194,10 @@
   <div class="stat"><div class="stat-label">Failed</div><div class="stat-value failed" id="statFailed">—</div></div>
   <div class="stat"><div class="stat-label">Total</div><div class="stat-value" id="statTotal">—</div></div>
   <div class="stat"><div class="stat-label">Pool Target</div><div class="stat-value" id="statPoolSize">—</div></div>
+  <div class="stat" id="syncStat">
+    <div class="stat-label">Last Sync</div>
+    <div class="stat-value" id="syncValue" style="color:var(--green);font-size:16px;">—</div>
+  </div>
 </div>
 
 <div class="metrics-bar" id="metricsBar">
@@ -180,15 +219,25 @@
     </div>
     <div class="metric-avg" id="claimAvg">avg: —</div>
   </div>
-  <div style="display:flex;align-items:center;gap:8px;margin-left:auto;">
-    <button class="btn" style="background:#e74c3c;color:#fff;border:none;border-radius:6px;padding:8px 14px;cursor:pointer;font-size:12px;font-weight:600;" onclick="resetMetrics()" title="Reset all metric counters">🗑 Reset Metrics</button>
-    <button class="btn" style="background:#dc2626;color:#fff;border:none;border-radius:6px;padding:8px 14px;cursor:pointer;font-size:12px;font-weight:600;" onclick="killAllClaimed()" title="Force-delete all claimed sandboxes">💀 Kill All Claimed</button>
+</div>
+
+<div class="throughput-graphs">
+  <div class="graph-card">
+    <h3>📈 Claims Per Second</h3>
+    <div class="graph-container">
+      <canvas id="claimChart"></canvas>
+    </div>
+  </div>
+  <div class="graph-card">
+    <h3>📂 Scheduled Per Second</h3>
+    <div class="graph-container">
+      <canvas id="scheduleChart"></canvas>
+    </div>
   </div>
 </div>
 
 <div class="toolbar">
-  <input type="text" class="search-box" id="searchBox" placeholder="🔍 Search sandboxes..." oninput="filterTable()">
-  <button class="btn btn-primary" onclick="openProvision()">+ Provision Sandbox</button>
+  <input type="text" class="search-box" id="searchBox" placeholder="🔍 Search by name, state, or node..." oninput="filterTable()" style="max-width:400px;">
 </div>
 
 <!-- Provision Modal -->
@@ -309,6 +358,33 @@ async function fetchStatus() {
     document.getElementById('statFailed').textContent = d.failed;
     document.getElementById('statTotal').textContent = d.total;
     document.getElementById('statPoolSize').textContent = d.poolSize;
+
+    // Throughput Rates
+    updateThroughputCharts(d);
+
+    // Sync Health Update
+    const syncVal = document.getElementById('syncValue');
+    const syncBanner = document.getElementById('syncBanner');
+    const syncBannerTime = document.getElementById('syncBannerTime');
+
+    if (!d.lastSyncSec || d.lastSyncSec < 0) {
+      syncVal.innerText = 'never';
+      syncVal.style.color = 'var(--dim)';
+    } else {
+      syncVal.innerText = d.lastSyncSec.toFixed(1) + 's';
+      if (d.synced) {
+        syncVal.style.color = 'var(--green)';
+        syncBanner.style.display = 'none';
+      } else {
+        syncVal.style.color = '#e74c3c';
+        syncBanner.style.display = 'block';
+        syncBannerTime.innerText = d.lastSyncSec.toFixed(0);
+      }
+    }
+
+    if (d.mismatchCount > 0) {
+      syncVal.innerHTML += ` <span style="font-size:10px;background:#e67e22;color:#fff;padding:2px 4px;border-radius:4px;margin-left:4px;">${d.mismatchCount} MISMATCH</span>`;
+    }
     // Only update pool size input if it is NOT focused (prevents auto-revert while editing).
     const poolInput = document.getElementById('poolSizeInput');
     if (document.activeElement !== poolInput) {
@@ -340,8 +416,14 @@ function renderTable(sandboxes) {
   const desiredNames = new Set();
   const rowData = sandboxes.map(sb => {
     desiredNames.add(sb.name);
-    const hidden = search && !sb.name.toLowerCase().includes(search) && !sb.state.toLowerCase().includes(search) && !(sb.node||'').toLowerCase().includes(search);
-    return { sb, hidden };
+    const label = stateLabel(sb).toLowerCase();
+    const nodeShort = (sb.node||'').replace(/gke-sandbox-gke-/,'').replace(/secondary-pool-/,'pool-').toLowerCase();
+    const match = !search || 
+      sb.name.toLowerCase().includes(search) || 
+      sb.state.toLowerCase().includes(search) || 
+      label.includes(search) ||
+      nodeShort.includes(search);
+    return { sb, hidden: !match };
   });
 
   // Remove rows that no longer exist.
@@ -1194,6 +1276,74 @@ document.addEventListener('keydown', (e) => {
     closeTerminal();
   }
 });
+
+// --- Performance Charts ---
+let lastStats = null;
+let lastStatsTime = null;
+const chartData = { claims: [], scheduled: [], labels: [] };
+const MAX_DATA_POINTS = 30; // 30 points * 2s = 60s history
+
+function initChart(id, label, color) {
+  return new Chart(document.getElementById(id), {
+    type: 'line',
+    data: {
+      labels: chartData.labels,
+      datasets: [{
+        label: label,
+        data: [],
+        borderColor: color,
+        backgroundColor: color + '22',
+        borderWidth: 2,
+        pointRadius: 0,
+        fill: true,
+        tension: 0.4
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { display: false },
+        y: { 
+          beginAtZero: true, 
+          grid: { color: 'rgba(255,255,255,0.05)' },
+          ticks: { color: '#8a8fa0', font: { size: 10 } }
+        }
+      },
+      animation: { duration: 0 }
+    }
+  });
+}
+
+const claimChart = initChart('claimChart', 'Claims/sec', '#3b82f6');
+const scheduleChart = initChart('scheduleChart', 'Sched/sec', '#22c55e');
+
+function updateThroughputCharts(d) {
+  const now = Date.now();
+  if (lastStats && lastStatsTime) {
+    const dt = (now - lastStatsTime) / 1000;
+    if (dt >= 1) {
+      const claimRate = Math.max(0, (d.totalClaims - lastStats.totalClaims) / dt);
+      const schedRate = Math.max(0, (d.totalScheduled - lastStats.totalScheduled) / dt);
+
+      chartData.labels.push('');
+      claimChart.data.datasets[0].data.push(claimRate);
+      scheduleChart.data.datasets[0].data.push(schedRate);
+
+      if (chartData.labels.length > MAX_DATA_POINTS) {
+        chartData.labels.shift();
+        claimChart.data.datasets[0].data.shift();
+        scheduleChart.data.datasets[0].data.shift();
+      }
+
+      claimChart.update();
+      scheduleChart.update();
+    }
+  }
+  lastStats = d;
+  lastStatsTime = now;
+}
 </script>
 
 </body>

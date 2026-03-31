@@ -43,6 +43,10 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Increase throughput for high-concurrency benchmarks
+	config.QPS = 100
+	config.Burst = 200
+
 	client, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		slog.Error("failed to create k8s client", "error", err)

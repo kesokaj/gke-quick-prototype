@@ -39,6 +39,21 @@ var (
 	}, []string{"reason"})
 )
 
+var sandboxSyncMismatchTotal = promauto.NewCounter(prometheus.CounterOpts{
+	Name: "sandbox_sync_mismatch_total",
+	Help: "Total instances where the controller store state had to be reverted because of GKE label mismatch.",
+})
+
+var sandboxClaimTotal = promauto.NewCounter(prometheus.CounterOpts{
+	Name: "sandbox_claim_total",
+	Help: "Total number of sandboxes successfully claimed by clients.",
+})
+
+var sandboxScheduledTotal = promauto.NewCounter(prometheus.CounterOpts{
+	Name: "sandbox_scheduled_total",
+	Help: "Total number of new pods in the warmpool that have become Ready.",
+})
+
 // resetMetrics re-registers histogram metrics, effectively zeroing them.
 func resetMetrics() {
 	prometheus.Unregister(sandboxScheduleDuration)
@@ -129,4 +144,13 @@ func histogramQuantile(q float64, hist *dto.Histogram) float64 {
 	}
 
 	return math.Round(buckets[len(buckets)-1].GetUpperBound()*1000) / 1000
+}
+
+// extractCounterValue reads a Prometheus counter and returns its value.
+func extractCounterValue(c prometheus.Counter) float64 {
+	var m dto.Metric
+	if err := c.Write(&m); err != nil {
+		return 0
+	}
+	return m.GetCounter().GetValue()
 }

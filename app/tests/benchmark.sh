@@ -140,6 +140,16 @@ get_claims()    { cat "${COUNT_DIR}/claims" 2>/dev/null || echo 0; }
 get_errors()    { cat "${COUNT_DIR}/errors" 2>/dev/null || echo 0; }
 get_exhausted() { cat "${COUNT_DIR}/exhausted" 2>/dev/null || echo 0; }
 
+# Print actual API error once per type per phase
+log_error() {
+    local err="$1"
+    local hash; hash=$(echo "$err" | md5sum | cut -d' ' -f1)
+    if [[ ! -f "${COUNT_DIR}/err_${hash}" ]]; then
+        warn "API Error: ${err}"
+        touch "${COUNT_DIR}/err_${hash}"
+    fi
+}
+
 rand_between() {
     local min="$1" max="$2"
     echo $(( min + RANDOM % (max - min + 1) ))
@@ -285,6 +295,7 @@ claim_sandbox() {
             inc_exhausted
         else
             inc_errors
+            log_error "$err"
         fi
         return 1
     fi
@@ -442,9 +453,12 @@ phase_surge() {
         if [[ $idle -lt 1 ]]; then
             local elapsed=$(( $(date +%s) - start_ts ))
             log "Pool empty — waiting for replacements... (${remaining} left, ${elapsed}s)"
-            sleep 0.5
+            sleep 1
             continue
         fi
+
+        # Small delay between surge batches to let controller catch up
+        sleep 0.2
 
         # Claim up to what's available
         local to_claim=$remaining
