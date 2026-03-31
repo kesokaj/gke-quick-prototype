@@ -1046,7 +1046,7 @@
                                           {
                                                 "timeSeriesQuery": {
                                                       "timeSeriesFilter": {
-                                                            "filter": "metric.type=\"kubernetes.io/node/cpu/allocatable_utilization\" resource.type=\"gke_container\"",
+                                                            "filter": "metric.type=\"kubernetes.io/node/cpu/allocatable_utilization\" resource.type=\"k8s_node\"",
                                                             "aggregation": {
                                                                   "alignmentPeriod": "60s",
                                                                   "perSeriesAligner": "ALIGN_MEAN",
@@ -1083,7 +1083,7 @@
                                           {
                                                 "timeSeriesQuery": {
                                                       "timeSeriesFilter": {
-                                                            "filter": "metric.type=\"kubernetes.io/node/memory/allocatable_utilization\" resource.type=\"gke_container\"",
+                                                            "filter": "metric.type=\"kubernetes.io/node/memory/allocatable_utilization\" resource.type=\"k8s_node\"",
                                                             "aggregation": {
                                                                   "alignmentPeriod": "60s",
                                                                   "perSeriesAligner": "ALIGN_MEAN",
@@ -1120,7 +1120,7 @@
                                           {
                                                 "timeSeriesQuery": {
                                                       "timeSeriesFilter": {
-                                                            "filter": "metric.type=\"kubernetes.io/node/ephemeral_storage/used_bytes\" resource.type=\"gke_container\"",
+                                                            "filter": "metric.type=\"kubernetes.io/node/ephemeral_storage/used_bytes\" resource.type=\"k8s_node\"",
                                                             "aggregation": {
                                                                   "alignmentPeriod": "60s",
                                                                   "perSeriesAligner": "ALIGN_MEAN",
