@@ -64,7 +64,6 @@ var downloadFile1MB = downloadFile{"http://speedtest.tele2.net/1MB.zip", 1 * 102
 
 const downloadCount = 5 // 5 × 1MB = 5MB total per sandbox (Cloud NAT cost control)
 
-
 func logEvent(phase, msg string, fields map[string]interface{}) {
 	entry := map[string]interface{}{
 		"ts":    time.Now().UTC().Format(time.RFC3339Nano),

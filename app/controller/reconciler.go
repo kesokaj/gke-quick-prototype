@@ -23,7 +23,7 @@ type Reconciler struct {
 	store         *Store
 	namespace     string
 	deployName    string
-	httpClient    *http.Client // reusable client for pod health checks
+	httpClient    *http.Client  // reusable client for pod health checks
 	kickCh        chan struct{} // non-blocking signal to trigger immediate sync
 }
 

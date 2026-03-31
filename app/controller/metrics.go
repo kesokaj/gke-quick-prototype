@@ -125,7 +125,6 @@ func histogramQuantile(q float64, hist *dto.Histogram) float64 {
 
 	rank := q * count
 
-
 	var prevCount float64
 	var prevBound float64
 	for _, b := range buckets {
