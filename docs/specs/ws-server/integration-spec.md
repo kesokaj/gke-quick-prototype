@@ -13,8 +13,9 @@ The `ws-server` is a Cloud Run service that simulates persistent developer sessi
 | Region           | `europe-west4` (same as GKE cluster)          |
 | Port             | `8080`                                        |
 | Auth             | Requires `roles/run.invoker` (Workload ID)    |
+| Concurrency      | `300` requests per instance                   |
 | Min instances    | `0` (scales to zero)                          |
-| Max instances    | `10`                                          |
+| Max instances    | `100`                                         |
 | Session affinity | Enabled                                       |
 | Timeout          | `3600s` (1 hour, Cloud Run max for WS)        |
 

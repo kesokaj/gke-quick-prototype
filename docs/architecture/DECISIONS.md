@@ -117,3 +117,29 @@ Sandbox pods simulate developer workloads (CPU cycles, disk I/O, network downloa
 - Cloud Run auto-scales from 0 (no cost when no sandboxes are claimed)
 - WS server is fully managed — no infrastructure to maintain beyond the deploy script
 - Deploy script handles build, push, Cloud Run deployment, and IAM binding automatically
+
+## ADR-006: Reconciler Performance & Bulk Cleanup
+
+**Date:** 2026-03-31
+**Status:** Accepted
+
+### Context
+
+During high-churn benchmarks (500+ pod pool, surge claims of 200-1000), the controller reported 0 idle pods for 10-15 seconds after surges, even though K8s showed pods as Running. The 5-second reconciler interval combined with a blocking metrics API call created a "blind window" where the controller couldn't see newly created replacement pods.
+
+Additionally, after benchmarks, hundreds of claimed (detached) pods lingered with no way to bulk-delete them since they are no longer managed by the Deployment.
+
+### Decision
+
+- **Reconciler interval**: 5s → **1s**. Each sync is a single `List` call + Deployment `Get`, so the kube-api load increase is minimal (~5 QPS).
+- **Async metrics fetch**: The Metrics API call (`PodMetricses.List`) now runs in a goroutine concurrent with the pod list processing. This saves ~500ms per sync cycle at scale.
+- **Bulk claimed cleanup**: New `DELETE /api/claimed` endpoint lists all `warmpool=false` pods and force-deletes them with `GracePeriodSeconds=0`. UI button with confirmation dialog.
+- **Portable atomic counters**: Benchmark script uses `mkdir`-based locking instead of `flock` (macOS compatibility).
+
+### Consequences
+
+- Controller "blind window" reduced from ~10s to ~2s (1s interval + ~1s sync duration)
+- Metrics fetch no longer blocks pod state updates
+- Post-benchmark cleanup is instant via UI button
+- Benchmark script works on both macOS and Linux without additional dependencies
+
