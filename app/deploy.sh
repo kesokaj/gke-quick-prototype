@@ -351,8 +351,9 @@ ensure_ws_server() {
         --platform=managed \
         --no-allow-unauthenticated \
         --port=8080 \
+        --concurrency=300 \
         --min-instances=0 \
-        --max-instances=10 \
+        --max-instances=100 \
         --timeout=3600 \
         --session-affinity \
         --cpu=1 \
