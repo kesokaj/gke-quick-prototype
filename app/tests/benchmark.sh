@@ -747,11 +747,10 @@ EOF
     TIMER_PID=$!
     log "Benchmark started — will stop in ${DURATION_MIN} minutes (mode: ${mode_label})"
 
-    # Start background steady drip (1-50 claims every 2-5s, always running)
+    # Start background steady drip (1-3 claims every 2-5s, always running)
     steady_drip &
     DRIP_PID=$!
-    local max_drip=$(( BASELINE * 2 / 100 )); [[ $max_drip -lt 1 ]] && max_drip=1
-    log "Steady drip started (1–${max_drip} claims every 2-5s, PID ${DRIP_PID})"
+    log "Steady drip started (1–3 claims every 2-5s, PID ${DRIP_PID})"
 
     if $DETERMINISTIC; then
         local cycle=0
