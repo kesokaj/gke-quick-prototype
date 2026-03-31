@@ -146,19 +146,19 @@ Applied automatically during `./cluster.sh create`:
 ├── app/
 │   ├── controller/                     # Warm pool controller (Go)
 │   ├── sandbox/                        # Simulation pod binary (Go)
+│   ├── ws-server/                      # WebSocket session server (Go, Cloud Run)
 │   ├── manifests/                      # K8s manifests (namespaces, controller, deployment, netpol)
 │   ├── tests/                          # Benchmark + monitoring scripts
 │   └── deploy.sh                       # Build, push, and deploy script
 ├── gke/
 │   ├── shared/                         # Applied during cluster create
 │   │   ├── cilium-config-override.yaml
+│   │   ├── cilium-identity-labels-patch.yaml  # Identity label exclusion (warmpool, agent, pool)
 │   │   ├── cilium-pod-monitoring.yaml
-│   │   ├── netd-conntrack-monitoring.yaml   # prometheus-to-sd → Cloud Monitoring (conntrack)
-│   │   ├── runsc-pod-monitoring.yaml         # prometheus-to-sd → Cloud Monitoring (gVisor)
+│   │   ├── netd-conntrack-monitoring.yaml     # prometheus-to-sd → Cloud Monitoring (conntrack)
+│   │   ├── runsc-pod-monitoring.yaml           # prometheus-to-sd → Cloud Monitoring (gVisor)
 │   │   ├── controller-pod-monitoring.yaml
 │   │   └── kubelet-extra-monitoring.yaml
-│   ├── manual/                         # Manual-apply configs (not auto-deployed)
-│   │   └── cilium-identity-labels-patch.yaml
 │   └── secondary/                      # Secondary pool configs (optional)
 ├── gcp/
 │   ├── dashboard.json.tpl              # GCP Monitoring dashboard template (__CLUSTER_NAME__ placeholder)

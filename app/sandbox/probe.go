@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"crypto/tls"
-	"fmt"
 	"net"
 	"net/http"
 	"time"
@@ -20,7 +19,7 @@ func probeNetworkAccess(ctx context.Context, mc *metricsClient) {
 	startMs := time.Now().UnixMilli()
 	startTime := time.Now()
 
-	fmt.Printf("START: Pod ready to transmit at %d\n", startMs)
+	logEvent("probe", "pod ready to transmit", map[string]interface{}{"start_ms": startMs})
 
 	logEvent("probe", "network probe started", map[string]interface{}{
 		"target":   probeTarget,
@@ -61,9 +60,6 @@ func probeNetworkAccess(ctx context.Context, mc *metricsClient) {
 			if code == 200 || code == 301 || code == 302 {
 				endMs := time.Now().UnixMilli()
 				deltaMs := endMs - startMs
-
-				fmt.Printf("SUCCESS: Traffic allowed at %d\n", endMs)
-				fmt.Printf("RESULT_LATENCY_MS: %d\n", deltaMs)
 
 				logEvent("probe", "network probe succeeded", map[string]interface{}{
 					"end_ms":     endMs,
