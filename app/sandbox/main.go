@@ -155,7 +155,7 @@ func downloadToFile(ctx context.Context, url, destPath string) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("HTTP %d", resp.StatusCode)
+		return fmt.Errorf("http %d", resp.StatusCode)
 	}
 
 	f, err := os.Create(destPath)
@@ -314,6 +314,10 @@ func phaseDiskWrite(ctx context.Context) {
 
 	const chunkSize = 64 * 1024 * 1024
 	chunk := make([]byte, chunkSize)
+	// pre-fill chunk with dummy data to avoid runtime MathRand overhead
+	for i := range chunk {
+		chunk[i] = byte(i % 256)
+	}
 	var totalWritten int64
 	fileIndex := 0
 	start := time.Now()
@@ -327,8 +331,6 @@ func phaseDiskWrite(ctx context.Context) {
 			return
 		default:
 		}
-
-		mathrand.Read(chunk)
 
 		filePath := filepath.Join(writeDir, fmt.Sprintf("data_%d.bin", fileIndex))
 		if err := os.WriteFile(filePath, chunk, 0644); err != nil {
