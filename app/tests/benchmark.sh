@@ -3,20 +3,30 @@
 # Sandbox Controller Benchmark — User Churn Simulator
 #
 # Simulates users claiming sandboxes from a pre-configured warmpool.
-# Sets the pool to --baseline once, then hammers it with claim requests
-# using random phase patterns to create high churn.
+# Sets the pool to --baseline once, then creates traffic using either
+# random or deterministic phase patterns.
 #
-# Claimed sandboxes live for --lifetime, then the controller cleans them
-# up and the Deployment auto-creates replacements. This tests:
+# Traffic patterns:
+#   steady   — ~10 claims/tick (5-15), 1-3s interval. Normal user traffic.
+#   surge    — claim rand(surge-min, surge-max). Retries until fulfilled (max 120s).
+#   spike    — fire surge-max claims at once (flash crowd, no retry).
+#   quiet    — near-zero traffic (0-2/tick). Observes pool recovery.
+#   drip     — background 1-3 claims every 2-5s, always running.
+#
+# Claimed sandboxes get a random TTL (2m to --lifetime), then the controller
+# GCs them and the Deployment auto-creates replacements. This tests:
 #   - Claim throughput under load
 #   - Pool recovery speed after surges
 #   - K8s scheduling + node autoscaling under churn
 #   - Controller stability at scale
 #
+# Duration is enforced by time checks in every phase loop, so the benchmark
+# reliably stops when --duration is reached even during heavy surges.
+#
 # Usage:
-#   ./benchmark.sh --baseline 500 --surge-min 100 --surge-max 500 --duration 30
-#   ./benchmark.sh --baseline 1000 --surge-min 200 --surge-max 2000 --lifetime 5m
-#   ./benchmark.sh --deterministic --baseline 100 --surge-min 20 --surge-max 80
+#   ./benchmark.sh --baseline 500 --surge-min 10 --surge-max 150 --duration 30
+#   ./benchmark.sh --deterministic --baseline 1000 --surge-min 10 --surge-max 150
+#   ./benchmark.sh --baseline 1000 --surge-min 200 --surge-max 1000 --lifetime 5m
 #   ./benchmark.sh --dry-run --baseline 50 --surge-min 10 --surge-max 30
 #   ./benchmark.sh --help
 #
@@ -388,7 +398,7 @@ node_summary() {
 # Phases — simulate different user traffic patterns
 # ---------------------------------------------------------------------------
 
-# STEADY: light claiming, percentage of baseline
+# STEADY: light claiming, ~10 pods per tick every 1-3s
 phase_steady() {
     local duration_sec="${1:-60}"
     local label="${2:-STEADY}"
@@ -400,21 +410,9 @@ phase_steady() {
         [[ "$INTERRUPTED" == "true" ]] && return
         is_expired && return
 
-        # Claim 1-10% of baseline per tick (organic trickle)
-        local pct batch
-        pct=$(rand_between 1 10)
-        batch=$(( BASELINE * pct / 100 ))
-        [[ $batch -lt 1 ]] && batch=1
-
-        # 15% chance of a small burst (20-40% of baseline)
-        local roll
-        roll=$(rand_between 1 100)
-        if [[ $roll -le 15 ]]; then
-            pct=$(rand_between 20 40)
-            batch=$(( BASELINE * pct / 100 ))
-            [[ $batch -lt 1 ]] && batch=1
-            log "${YELLOW}⚡ Small burst: ${batch} claims${NC}"
-        fi
+        # Claim ~10 pods per tick (organic trickle)
+        local batch
+        batch=$(rand_between 5 15)
 
         claim_batch "$batch"
 
@@ -591,13 +589,12 @@ run_random() {
 }
 
 # ---------------------------------------------------------------------------
-# Background steady drip — always-on normal user traffic
+# Background steady drip — 1-3 claims every 2-5s, always running
 # ---------------------------------------------------------------------------
 DRIP_PID=""
 
 steady_drip() {
-    local max_drip=$(( BASELINE * 2 / 100 ))
-    [[ $max_drip -lt 1 ]] && max_drip=1
+    local max_drip=3
     while true; do
         [[ "$INTERRUPTED" == "true" ]] && return
         is_expired && return
@@ -760,6 +757,7 @@ EOF
         local cycle=0
         while true; do
             [[ "$INTERRUPTED" == "true" ]] && break
+            is_expired && break
             cycle=$((cycle + 1))
             run_deterministic_cycle "$cycle" "∞"
         done

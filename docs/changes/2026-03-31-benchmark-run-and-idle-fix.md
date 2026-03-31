@@ -77,9 +77,18 @@ endpoint is trivial (returns static JSON), so 1s period is safe.
 
 - Added `is_expired()` helper that checks elapsed time against `DURATION_SEC`
 - All phase functions (`phase_steady`, `phase_surge`, `phase_quiet`) now check `is_expired()` on each loop iteration
-- `run_random()` and `steady_drip()` also check `is_expired()`
+- `run_random()`, `steady_drip()`, and deterministic cycle loop also check `is_expired()`
 - `phase_surge` has a 120s max timeout to prevent infinite "waiting for replacements" spins
 - Benchmark now reliably stops within seconds of the configured duration
+
+### 4. Benchmark Traffic Rate Fix (`app/tests/benchmark.sh`)
+
+- `phase_steady` previously claimed 1-10% of BASELINE per tick (10-100 pods with baseline=1000)
+  plus 15% chance of 20-40% bursts (200-400 pods). Now claims a fixed 5-15 pods per tick.
+- `steady_drip` previously claimed 1-20 pods (2% of baseline) every 2-5s.
+  Now claims 1-3 pods every 2-5s.
+- These changes ensure steady/drip traffic doesn't drain the pool — only
+  surge and spike phases should cause significant pool pressure.
 
 ## Modified Files
 
