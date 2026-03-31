@@ -65,7 +65,7 @@ metadata:
   name: cilium-config
   namespace: kube-system
 data:
-  # Exclude 'warmpool' from identity-relevant labels.
-  # The '!' prefix tells Cilium to ignore this label when computing identities.
-  # All sandbox pods will share one identity regardless of warmpool=true/false.
-  labels: "!warmpool"
+  # Exclude 'warmpool', 'agents.x-k8s.io/sandbox-name-hash', and 'pool' from identity-relevant labels.
+  # The '!' prefix tells Cilium to ignore these labels when computing identities.
+  # All sandbox pods will share one identity regardless of these attributes.
+  labels: "!warmpool !agents.x-k8s.io/sandbox-name-hash !pool"

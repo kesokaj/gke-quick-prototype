@@ -573,6 +573,55 @@ apply_shared() {
         fi
     fi
 
+    # Cilium Identity-Relevant Label Filtering Workaround
+    # Excludes labels from identity computation to prevent churn (e.g. warmpool).
+    # Per GKE Dataplane V2 docs: apply to data.labels in main cilium-config, 
+    # trigger control plane upgrade to reload operator, then restart anetd.
+    if [[ -f "${shared_dir}/cilium-identity-labels-patch.yaml" ]]; then
+        log "Applying Cilium identity label exclusions..."
+        if [[ "${dry_run}" == "--dry-run" ]]; then
+            warn "DRY RUN — would patch main cilium-config"
+            warn "DRY RUN — would trigger control plane upgrade (anet-operator reload)"
+            warn "DRY RUN — would restart anetd DaemonSet"
+        else
+            # 1. Ensure labels key is removed from emergency-override (if present)
+            kubectl patch configmap cilium-config-emergency-override -n kube-system \
+                --type json -p '[{"op": "remove", "path": "/data/labels"}]' 2>/dev/null || true
+
+            # 2. Patch data.labels in main cilium-config
+            local label_patch
+            label_patch="$(kubectl create \
+                -f "${shared_dir}/cilium-identity-labels-patch.yaml" \
+                --dry-run=client -o json \
+                | python3 -c 'import json,sys; cm=json.load(sys.stdin); print(json.dumps({"data": {"labels": cm["data"]["labels"]}}))')"
+            kubectl patch configmap cilium-config -n kube-system \
+                --type merge \
+                -p "${label_patch}"
+            ok "Main cilium-config labels patched"
+
+            # 3. Reload anet-operator via same-version master upgrade
+            log "Reloading anet-operator (initiating same-version control plane upgrade)..."
+            local master_version
+            master_version="$(gcloud container clusters describe "${CLUSTER_NAME}" \
+                --project="${PROJECT}" --region="${REGION}" \
+                --format="value(currentMasterVersion)")"
+            
+            gcloud container clusters upgrade "${CLUSTER_NAME}" \
+                --project="${PROJECT}" \
+                --region="${REGION}" \
+                --master \
+                --cluster-version="${master_version}" \
+                --quiet
+            ok "Control plane upgrade complete"
+
+            # 4. Restart anetd DaemonSet
+            log "Restarting anetd DaemonSet..."
+            kubectl -n kube-system rollout restart daemonset/anetd
+            kubectl -n kube-system rollout status daemonset/anetd --timeout=120s
+            ok "anetd restarted with new identity filters"
+        fi
+    fi
+
     # Monitoring resources (ClusterPodMonitoring, PodMonitoring, ClusterNodeMonitoring)
     local monitoring_files=(
         "cilium-pod-monitoring.yaml"

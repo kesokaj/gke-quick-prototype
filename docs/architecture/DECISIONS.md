@@ -58,8 +58,8 @@ In GKE Dataplane V2, Cilium computes a security identity from all pod labels. Wh
 
 ### Decision
 
-- **Exclude `warmpool` from identity** via `cilium-config.data.labels = !warmpool` (not `cilium-config-emergency-override`, which is broken per GKE v1.34/1.35 known issue)
-- **Automation script** (`gke/manual/apply-cilium-identity-labels.sh`) follows the official [GKE workaround](https://docs.cloud.google.com/kubernetes-engine/docs/how-to/dataplane-v2#identity-relevant-label-filtering-issue): patch config → same-version master upgrade → anetd rolling restart
+- **Exclude `warmpool`, `agents.x-k8s.io/sandbox-name-hash`, and `pool` from identity** via a unified patch to `cilium-config.data.labels` (not `cilium-config-emergency-override`, which is broken per GKE v1.34/1.35 known issue)
+- **Standardized cluster automation** (`cluster.sh` via `gke/shared/cilium-identity-labels-patch.yaml`) now automatically applies the official [GKE workaround](https://docs.cloud.google.com/kubernetes-engine/docs/how-to/dataplane-v2#identity-relevant-label-filtering-issue): patch main config → same-version master upgrade → anetd rolling restart
 - **ConfigMap-based config** persists through GKE upgrades since user modifications to `cilium-config` are preserved
 
 ### Consequences
