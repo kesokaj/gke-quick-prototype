@@ -69,8 +69,8 @@ spec:
               path: /_sandbox/status?keepalive=false
               port: 3004
               scheme: HTTP
-            initialDelaySeconds: 1
-            periodSeconds: 2
+            initialDelaySeconds: 0
+            periodSeconds: 1
             successThreshold: 1
             timeoutSeconds: 2
           startupProbe:

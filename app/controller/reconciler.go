@@ -117,7 +117,7 @@ func (r *Reconciler) sync(ctx context.Context) {
 			state = "active"
 		}
 
-		if state == "idle" && pod.Status.Phase != corev1.PodRunning {
+		if state == "idle" && (pod.Status.Phase != corev1.PodRunning || !isPodReady(pod)) {
 			state = "pending"
 		}
 

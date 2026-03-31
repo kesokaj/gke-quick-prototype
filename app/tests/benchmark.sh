@@ -155,6 +155,12 @@ rand_between() {
     echo $(( min + RANDOM % (max - min + 1) ))
 }
 
+# Check if the benchmark duration has been exceeded.
+is_expired() {
+    local now; now=$(date +%s)
+    (( now - BENCH_START_EPOCH >= DURATION_SEC ))
+}
+
 # Parse a duration string (e.g. "5m", "3m", "300s") to seconds.
 duration_to_sec() {
     local d="$1"
@@ -392,6 +398,7 @@ phase_steady() {
     local elapsed=0
     while [[ $elapsed -lt $duration_sec ]]; do
         [[ "$INTERRUPTED" == "true" ]] && return
+        is_expired && return
 
         # Claim 1-10% of baseline per tick (organic trickle)
         local pct batch
@@ -437,8 +444,18 @@ phase_surge() {
     local start_ts
     start_ts=$(date +%s)
 
+    local max_surge_sec=120
+
     while true; do
         [[ "$INTERRUPTED" == "true" ]] && return
+        is_expired && return
+
+        # Bail if this single surge has been running too long
+        local surge_elapsed=$(( $(date +%s) - start_ts ))
+        if (( surge_elapsed > max_surge_sec )); then
+            warn "Surge timed out after ${surge_elapsed}s (max ${max_surge_sec}s)"
+            break
+        fi
 
         local claimed_now
         claimed_now=$(get_claims)
@@ -492,6 +509,7 @@ phase_quiet() {
     local elapsed=0
     while [[ $elapsed -lt $duration_sec ]]; do
         [[ "$INTERRUPTED" == "true" ]] && return
+        is_expired && return
 
         # Occasional trickle (0-2 claims per tick)
         local trickle
@@ -545,6 +563,7 @@ run_deterministic_cycle() {
 run_random() {
     while true; do
         [[ "$INTERRUPTED" == "true" ]] && break
+        is_expired && break
 
         local roll
         roll=$(rand_between 1 100)
@@ -581,6 +600,7 @@ steady_drip() {
     [[ $max_drip -lt 1 ]] && max_drip=1
     while true; do
         [[ "$INTERRUPTED" == "true" ]] && return
+        is_expired && return
         local batch
         batch=$(rand_between 1 "$max_drip")
         claim_batch "$batch" > /dev/null 2>&1

@@ -91,7 +91,7 @@ managed by the Deployment.
 | ------------------ | ------- |
 | Sync interval      | 1s      |
 | Pod label selector | `managed-by=warmpool` |
-| State derivation   | `warmpool=false` → active, Running → idle, else pending/failed |
+| State derivation   | `warmpool=false` → active, Running+Ready → idle, else pending/failed |
 | Metrics fetch      | Concurrent goroutine (non-blocking) |
 | GC targets         | TTL expired, failed, exited, stale (>24h unlimited) |
 | Kick channel       | Non-blocking signal from handlers for immediate sync |
