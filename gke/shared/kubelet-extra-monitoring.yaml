@@ -11,3 +11,10 @@ spec:
         - action: keep
           sourceLabels: [__name__]
           regex: "kubelet_.*"
+    - interval: 10s
+      path: /metrics/cadvisor
+      scheme: https
+      metricRelabeling:
+        - action: keep
+          sourceLabels: [__name__]
+          regex: "container_pressure_.*"

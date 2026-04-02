@@ -377,17 +377,10 @@
                                     "dataSets": [
                                           {
                                                 "timeSeriesQuery": {
-                                                      "prometheusQuery": "histogram_quantile(0.99, sum by (le, operation_type) (rate(kubelet_runtime_operations_duration_seconds_bucket{cluster=\"__CLUSTER_NAME__\"}[5m])))"
+                                                      "prometheusQuery": "topk(10, histogram_quantile(0.99, sum by (le, operation_type) (rate(kubelet_runtime_operations_duration_seconds_bucket{cluster=\"__CLUSTER_NAME__\"}[5m]))))"
                                                 },
                                                 "plotType": "LINE",
-                                                "legendTemplate": "p99"
-                                          },
-                                          {
-                                                "timeSeriesQuery": {
-                                                      "prometheusQuery": "histogram_quantile(0.50, sum by (le, operation_type) (rate(kubelet_runtime_operations_duration_seconds_bucket{cluster=\"__CLUSTER_NAME__\"}[5m])))"
-                                                },
-                                                "plotType": "LINE",
-                                                "legendTemplate": "p50"
+                                                "legendTemplate": "p99 (${metric.labels.operation_type})"
                                           }
                                     ],
                                     "yAxis": {
@@ -763,7 +756,7 @@
                                     "dataSets": [
                                           {
                                                 "timeSeriesQuery": {
-                                                      "prometheusQuery": "max by (map_name) (cilium_bpf_map_pressure{cluster=\"__CLUSTER_NAME__\"}) > 0"
+                                                      "prometheusQuery": "topk(10, max by (map_name) (cilium_bpf_map_pressure{cluster=\"__CLUSTER_NAME__\"})) > 0"
                                                 },
                                                 "plotType": "LINE",
                                                 "legendTemplate": "pressure"
@@ -997,17 +990,31 @@
                                     "dataSets": [
                                           {
                                                 "timeSeriesQuery": {
-                                                      "prometheusQuery": "rate(cilium_process_cpu_seconds_total{cluster=\"__CLUSTER_NAME__\"}[1m])"
+                                                      "prometheusQuery": "avg(rate(cilium_process_cpu_seconds_total{cluster=\"__CLUSTER_NAME__\"}[1m]))"
                                                 },
                                                 "plotType": "LINE",
-                                                "legendTemplate": "CPU (cores)"
+                                                "legendTemplate": "CPU Avg (cores)"
                                           },
                                           {
                                                 "timeSeriesQuery": {
-                                                      "prometheusQuery": "cilium_process_resident_memory_bytes{cluster=\"__CLUSTER_NAME__\"} / 1024 / 1024 / 1024"
+                                                      "prometheusQuery": "max(rate(cilium_process_cpu_seconds_total{cluster=\"__CLUSTER_NAME__\"}[1m]))"
                                                 },
                                                 "plotType": "LINE",
-                                                "legendTemplate": "Memory (GiB)"
+                                                "legendTemplate": "CPU Max (cores)"
+                                          },
+                                          {
+                                                "timeSeriesQuery": {
+                                                      "prometheusQuery": "avg(cilium_process_resident_memory_bytes{cluster=\"__CLUSTER_NAME__\"}) / 1024 / 1024 / 1024"
+                                                },
+                                                "plotType": "LINE",
+                                                "legendTemplate": "Memory Avg (GB)"
+                                          },
+                                          {
+                                                "timeSeriesQuery": {
+                                                      "prometheusQuery": "max(cilium_process_resident_memory_bytes{cluster=\"__CLUSTER_NAME__\"}) / 1024 / 1024 / 1024"
+                                                },
+                                                "plotType": "LINE",
+                                                "legendTemplate": "Memory Max (GB)"
                                           }
                                     ],
                                     "yAxis": {
@@ -1980,7 +1987,7 @@
                                                             "aggregation": {
                                                                   "alignmentPeriod": "120s",
                                                                   "perSeriesAligner": "ALIGN_MEAN",
-                                                                  "crossSeriesReducer": "REDUCE_NONE"
+                                                                  "crossSeriesReducer": "REDUCE_SUM"
                                                             }
                                                       }
                                                 },
@@ -1995,7 +2002,7 @@
                                                             "aggregation": {
                                                                   "alignmentPeriod": "120s",
                                                                   "perSeriesAligner": "ALIGN_MEAN",
-                                                                  "crossSeriesReducer": "REDUCE_NONE"
+                                                                  "crossSeriesReducer": "REDUCE_SUM"
                                                             }
                                                       }
                                                 },
@@ -2452,6 +2459,122 @@
                                     ],
                                     "yAxis": {
                                           "label": "Instance-seconds/s",
+                                          "scale": "LINEAR"
+                                    },
+                                    "chartOptions": {
+                                          "mode": "COLOR"
+                                    }
+                              }
+                        }
+                  },
+                  {
+                        "yPos": 444,
+                        "xPos": 0,
+                        "width": 48,
+                        "height": 4,
+                        "widget": {
+                              "title": "",
+                              "text": {
+                                    "content": "# ⏱️ Container Pressure (PSI) — CPU, Memory, IO",
+                                    "format": "MARKDOWN",
+                                    "style": {}
+                              }
+                        }
+                  },
+                  {
+                        "yPos": 448,
+                        "xPos": 0,
+                        "width": 16,
+                        "height": 16,
+                        "widget": {
+                              "title": "CPU Pressure (PSI)",
+                              "xyChart": {
+                                    "dataSets": [
+                                          {
+                                                "timeSeriesQuery": {
+                                                      "prometheusQuery": "topk(10, sum by (pod) (rate(container_pressure_cpu_waiting_seconds_total{cluster=\"__CLUSTER_NAME__\"}[1m]))) > 0"
+                                                },
+                                                "plotType": "LINE",
+                                                "legendTemplate": "waiting (${metric.labels.pod})"
+                                          },
+                                          {
+                                                "timeSeriesQuery": {
+                                                      "prometheusQuery": "topk(10, sum by (pod) (rate(container_pressure_cpu_stalled_seconds_total{cluster=\"__CLUSTER_NAME__\"}[1m]))) > 0"
+                                                },
+                                                "plotType": "LINE",
+                                                "legendTemplate": "stalled (${metric.labels.pod})"
+                                          }
+                                    ],
+                                    "yAxis": {
+                                          "label": "Seconds/s",
+                                          "scale": "LINEAR"
+                                    },
+                                    "chartOptions": {
+                                          "mode": "COLOR"
+                                    }
+                              }
+                        }
+                  },
+                  {
+                        "yPos": 448,
+                        "xPos": 16,
+                        "width": 16,
+                        "height": 16,
+                        "widget": {
+                              "title": "Memory Pressure (PSI)",
+                              "xyChart": {
+                                    "dataSets": [
+                                          {
+                                                "timeSeriesQuery": {
+                                                      "prometheusQuery": "topk(10, sum by (pod) (rate(container_pressure_memory_waiting_seconds_total{cluster=\"__CLUSTER_NAME__\"}[1m]))) > 0"
+                                                },
+                                                "plotType": "LINE",
+                                                "legendTemplate": "waiting (${metric.labels.pod})"
+                                          },
+                                          {
+                                                "timeSeriesQuery": {
+                                                      "prometheusQuery": "topk(10, sum by (pod) (rate(container_pressure_memory_stalled_seconds_total{cluster=\"__CLUSTER_NAME__\"}[1m]))) > 0"
+                                                },
+                                                "plotType": "LINE",
+                                                "legendTemplate": "stalled (${metric.labels.pod})"
+                                          }
+                                    ],
+                                    "yAxis": {
+                                          "label": "Seconds/s",
+                                          "scale": "LINEAR"
+                                    },
+                                    "chartOptions": {
+                                          "mode": "COLOR"
+                                    }
+                              }
+                        }
+                  },
+                  {
+                        "yPos": 448,
+                        "xPos": 32,
+                        "width": 16,
+                        "height": 16,
+                        "widget": {
+                              "title": "IO Pressure (PSI)",
+                              "xyChart": {
+                                    "dataSets": [
+                                          {
+                                                "timeSeriesQuery": {
+                                                      "prometheusQuery": "topk(10, sum by (pod) (rate(container_pressure_io_waiting_seconds_total{cluster=\"__CLUSTER_NAME__\"}[1m]))) > 0"
+                                                },
+                                                "plotType": "LINE",
+                                                "legendTemplate": "waiting (${metric.labels.pod})"
+                                          },
+                                          {
+                                                "timeSeriesQuery": {
+                                                      "prometheusQuery": "topk(10, sum by (pod) (rate(container_pressure_io_stalled_seconds_total{cluster=\"__CLUSTER_NAME__\"}[1m]))) > 0"
+                                                },
+                                                "plotType": "LINE",
+                                                "legendTemplate": "stalled (${metric.labels.pod})"
+                                          }
+                                    ],
+                                    "yAxis": {
+                                          "label": "Seconds/s",
                                           "scale": "LINEAR"
                                     },
                                     "chartOptions": {
