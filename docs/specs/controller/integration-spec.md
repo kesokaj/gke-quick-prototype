@@ -83,7 +83,28 @@ managed by the Deployment.
 
 - Patches the `sandbox-pool` Deployment replicas
 - Deployment controller handles pod creation/deletion
-- Claimed pods (`warmpool=false`) are detached and unaffected by replica scaling
+- Claimed pods (`warmpool=false`) are true orphans (ownerReferences cleared) and unaffected by replica scaling
+
+## Provision Patch
+
+When a pod is claimed, the handler sends a single atomic JSON Merge Patch:
+
+```json
+{
+  "metadata": {
+    "labels": { "warmpool": "false" },
+    "annotations": {
+      "sandbox.gvisor/state": "claimed",
+      "sandbox.gvisor/claimed-at": "<RFC3339>"
+    },
+    "ownerReferences": []
+  }
+}
+```
+
+Clearing `ownerReferences` makes the pod a true orphan, bypassing the
+ReplicaSet controller's `ReleasePod` logic and preventing Expectations hangs
+(see ADR-008).
 
 ## Reconciler
 

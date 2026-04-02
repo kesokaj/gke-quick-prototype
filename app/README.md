@@ -17,6 +17,7 @@ app/
 ├── tests/
 │   ├── benchmark.sh             # Load testing / QPS benchmarks
 │   ├── monitor-cilium-identity.sh  # Cilium identity churn monitor
+│   ├── test-detach-comparison.sh   # Dirty vs clean detach RS behavior test
 │   └── test-sandbox-lifecycle.sh   # End-to-end lifecycle tests
 ├── deploy.sh       # Build, push, and deploy script
 └── .current-tag    # Auto-generated image tag
@@ -24,7 +25,7 @@ app/
 
 ### Controller
 
-Manages a warm pool of sandbox pods via a K8s Deployment. Pods sit idle until claimed (detached from the Deployment by flipping `warmpool=false` label). When a pod is detached, K8s auto-replaces it.
+Manages a warm pool of sandbox pods via a K8s Deployment. Pods sit idle until claimed (detached from the Deployment by flipping `warmpool=false` label and clearing `ownerReferences` atomically). The clean detach bypasses the RS controller's `ReleasePod` path, preventing Expectations hangs — K8s immediately auto-replaces the pod.
 
 ![Controller Lifecycle](docs/images/controller_lifecycle.png)
 

@@ -151,7 +151,7 @@ func (h *Handlers) handleProvision(w http.ResponseWriter, r *http.Request) {
 	// Detach from Deployment: warmpool=false orphans the pod and
 	// K8s auto-creates a replacement.
 	claimedAt := time.Now().Format(time.RFC3339)
-	patch := fmt.Sprintf(`{"metadata":{"labels":{"warmpool":"false"},"annotations":{"sandbox.gvisor/state":"claimed","sandbox.gvisor/claimed-at":"%s"}}}`, claimedAt)
+	patch := fmt.Sprintf(`{"metadata":{"labels":{"warmpool":"false"},"annotations":{"sandbox.gvisor/state":"claimed","sandbox.gvisor/claimed-at":"%s"},"ownerReferences":[]}}`, claimedAt)
 	_, err := h.client.CoreV1().Pods(h.namespace).Patch(
 		r.Context(), sb.Name, types.MergePatchType, []byte(patch), metav1.PatchOptions{},
 	)

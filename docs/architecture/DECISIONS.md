@@ -164,3 +164,29 @@ During high-churn benchmarking, potential disconnects between the controller's i
 - The system now auto-heals when data drift occurs between internal memory and K8s API.
 - Users receive immediate visual feedback on the health of the link between the Controller and GKE.
 - The UI graphs provide precise visibility into the API throughput without relying on external GCP monitoring dashboards.
+
+## ADR-008: Clean Detach via OwnerReference Removal
+
+**Date:** 2026-04-02
+**Status:** Accepted
+
+### Context
+
+When a sandbox pod is claimed, the controller detaches it from the ReplicaSet by changing the `warmpool` label from `"true"` to `"false"`. However, the pod kept its `ownerReferences` pointing to the RS. This created a race condition: the RS controller saw an owned pod with mismatched labels and triggered its internal `ReleasePod` logic (a Strategic Merge Patch to remove the `controllerRef`). Under concurrent load, this release patch could `409 Conflict` with the controller's provision patch, breaking the RS Expectations and preventing pod replenishment until a manual `kubectl rollout restart`.
+
+Verified via `kube-controller-manager` logs: dirty detach produces a `"Patching pod to remove its controllerRef"` entry; clean detach does not.
+
+### Decision
+
+- **Atomic patch** — The provision handler sends a single JSON Merge Patch that changes labels, sets annotations, AND clears `ownerReferences: []` in one API call
+- **MergePatchType** — Explicitly uses `application/merge-patch+json` (RFC 7386), where `[]` replaces the entire array, not `StrategicMergePatchType` which would merge by key
+- **True orphan** — Claimed pods become full orphans, not managed by the RS or Deployment GC. The controller's own GC handles their lifecycle (TTL, stale, failed)
+
+### Consequences
+
+- RS controller never enters the `ReleasePod` path for detached pods
+- No Expectations hang — RS immediately sees the pod deficit and creates a replacement
+- Claimed pods survive Deployment deletion (desired: they are actively in use)
+- `kubectl rollout restart` mitigation is no longer needed
+- Unit tests verify the patch payload structure and patch type
+
